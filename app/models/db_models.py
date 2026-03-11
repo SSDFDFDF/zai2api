@@ -9,7 +9,7 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, mapped_column, relationship
-from sqlalchemy.sql import func
+from sqlalchemy.sql import func, text
 
 
 class Base(DeclarativeBase):
@@ -23,8 +23,8 @@ class Token(Base):
     provider = mapped_column(String, nullable=False)
     token = mapped_column(String, nullable=False)
     token_type = mapped_column(String, default="user", nullable=False)
-    priority = mapped_column(Integer, default=0, server_default="0", nullable=False)
-    is_enabled = mapped_column(Boolean, default=True, server_default="true", nullable=False)
+    priority = mapped_column(Integer, default=0, server_default=text("0"), nullable=False)
+    is_enabled = mapped_column(Boolean, default=True, server_default=text("1"), nullable=False)
     created_at = mapped_column(DateTime, default=func.now(), server_default=func.now(), nullable=False)
     last_chat_cleanup = mapped_column(DateTime, nullable=True)
 
@@ -42,9 +42,9 @@ class TokenStats(Base):
     token_id = mapped_column(
         Integer, ForeignKey("tokens.id", ondelete="CASCADE"), nullable=False, unique=True
     )
-    total_requests = mapped_column(Integer, default=0, server_default="0", nullable=False)
-    successful_requests = mapped_column(Integer, default=0, server_default="0", nullable=False)
-    failed_requests = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    total_requests = mapped_column(Integer, default=0, server_default=text("0"), nullable=False)
+    successful_requests = mapped_column(Integer, default=0, server_default=text("0"), nullable=False)
+    failed_requests = mapped_column(Integer, default=0, server_default=text("0"), nullable=False)
     last_success_time = mapped_column(DateTime, nullable=True)
     last_failure_time = mapped_column(DateTime, nullable=True)
 
@@ -56,20 +56,20 @@ class RequestLog(Base):
 
     id = mapped_column(Integer, primary_key=True, autoincrement=True)
     provider = mapped_column(String, nullable=False)
-    endpoint = mapped_column(String, nullable=False, default="", server_default="")
-    source = mapped_column(String, nullable=False, default="unknown", server_default="unknown")
-    protocol = mapped_column(String, nullable=False, default="unknown", server_default="unknown")
-    client_name = mapped_column(String, nullable=False, default="Unknown", server_default="Unknown")
+    endpoint = mapped_column(String, nullable=False, default="", server_default=text("''"))
+    source = mapped_column(String, nullable=False, default="unknown", server_default=text("'unknown'"))
+    protocol = mapped_column(String, nullable=False, default="unknown", server_default=text("'unknown'"))
+    client_name = mapped_column(String, nullable=False, default="Unknown", server_default=text("'Unknown'"))
     model = mapped_column(String, nullable=False)
-    status_code = mapped_column(Integer, nullable=False, default=200, server_default="200")
+    status_code = mapped_column(Integer, nullable=False, default=200, server_default=text("200"))
     success = mapped_column(Boolean, nullable=False)
-    duration = mapped_column(Float, nullable=False, default=0.0, server_default="0.0")
-    first_token_time = mapped_column(Float, nullable=False, default=0.0, server_default="0.0")
-    input_tokens = mapped_column(Integer, nullable=False, default=0, server_default="0")
-    output_tokens = mapped_column(Integer, nullable=False, default=0, server_default="0")
-    cache_creation_tokens = mapped_column(Integer, nullable=False, default=0, server_default="0")
-    cache_read_tokens = mapped_column(Integer, nullable=False, default=0, server_default="0")
-    total_tokens = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    duration = mapped_column(Float, nullable=False, default=0.0, server_default=text("0.0"))
+    first_token_time = mapped_column(Float, nullable=False, default=0.0, server_default=text("0.0"))
+    input_tokens = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    output_tokens = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    cache_creation_tokens = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    cache_read_tokens = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    total_tokens = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
     error_message = mapped_column(Text, nullable=True)
     timestamp = mapped_column(DateTime, default=func.now(), server_default=func.now(), nullable=False)
 

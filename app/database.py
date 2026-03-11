@@ -79,14 +79,9 @@ async_session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncS
 
 async def init_db():
     """初始化数据库表"""
-    from app.models.db_models import Base
-    import app.models.db_models  # 确保模型被注册
-    from sqlalchemy import text
     from app.utils.logger import logger
     
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-        
         # 自动迁移检查（使用 Alembic）
         try:
             from alembic.config import Config
