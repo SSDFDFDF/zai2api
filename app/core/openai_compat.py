@@ -128,6 +128,17 @@ def format_sse_done() -> str:
 
 def handle_error(error: Exception, context: str = "") -> Dict[str, Any]:
     """统一错误处理。"""
+    # 未知模型 → model_not_found（路由层据此返回 404）
+    if isinstance(error, ValueError) and "不支持的模型" in str(error):
+        logger.warning(str(error))
+        return {
+            "error": {
+                "message": str(error),
+                "type": "invalid_request_error",
+                "code": "model_not_found",
+            }
+        }
+
     error_msg = f"上游{context}错误: {str(error)}" if context else f"上游错误: {str(error)}"
     logger.error(error_msg)
     return {

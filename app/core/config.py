@@ -89,6 +89,21 @@ class Settings(BaseSettings):
     SCAN_LIMIT: int = int(os.getenv("SCAN_LIMIT", "200000"))
     SKIP_AUTH_TOKEN: bool = os.getenv("SKIP_AUTH_TOKEN", "false").lower() == "true"
 
+    # HTTP Timeout Configuration (单位: 秒)
+    HTTP_CONNECT_TIMEOUT: float = float(os.getenv("HTTP_CONNECT_TIMEOUT", "5.0"))
+    HTTP_WRITE_TIMEOUT: float = float(os.getenv("HTTP_WRITE_TIMEOUT", "10.0"))
+    HTTP_POOL_TIMEOUT: float = float(os.getenv("HTTP_POOL_TIMEOUT", "5.0"))
+    # 普通短请求 (鉴权/文件上传/模型列表) 的读取超时
+    HTTP_DEFAULT_READ_TIMEOUT: float = float(os.getenv("HTTP_DEFAULT_READ_TIMEOUT", "60.0"))
+    # 流式聊天的读取超时 (即相邻两个 chunk 之间允许的最大空闲时间)
+    HTTP_STREAM_READ_TIMEOUT: float = float(os.getenv("HTTP_STREAM_READ_TIMEOUT", "120.0"))
+    # 在线模型列表拉取超时
+    HTTP_MODEL_FETCH_TIMEOUT: float = float(os.getenv("HTTP_MODEL_FETCH_TIMEOUT", "10.0"))
+    # 非流式请求端到端总超时（含所有重试）
+    CHAT_TOTAL_TIMEOUT: float = float(os.getenv("CHAT_TOTAL_TIMEOUT", "300.0"))
+    # 流式请求端到端总超时（含所有重试）
+    HTTP_STREAM_TOTAL_TIMEOUT: float = float(os.getenv("HTTP_STREAM_TOTAL_TIMEOUT", "600.0"))
+
     # Proxy Configuration (统一网络代理, 支持 HTTP/HTTPS/SOCKS5)
     HTTP_PROXY: Optional[str] = os.getenv("HTTP_PROXY")  # 统一代理, 默认使用本地 10808 端口
 

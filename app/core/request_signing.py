@@ -292,7 +292,7 @@ async def sign_request(
         )
     except Exception as e:
         logger.error(f"[上游] 签名生成失败: {e}")
-        signature = ""
+        raise RuntimeError(f"签名生成失败: {e}") from e
 
     # 构建请求头（保留所有字段）
     headers = build_dynamic_headers(fe_version, chat_id)

@@ -489,6 +489,103 @@ CONFIG_SECTIONS: tuple[ConfigSectionSpec, ...] = (
         ),
     ),
     ConfigSectionSpec(
+        id="timeouts",
+        title="超时控制",
+        description="系统各环节的超时时间（单位：秒）。支持小数，修改即时生效。",
+        fields=(
+            ConfigFieldSpec(
+                key="HTTP_CONNECT_TIMEOUT",
+                label="连接超时",
+                description="建立 TCP/TLS 连接的最大时间。",
+                value_type="float",
+                default_value=5.0,
+                input_type="number",
+                min_value=0.1,
+                placeholder="5.0",
+                db_persist=False,
+            ),
+            ConfigFieldSpec(
+                key="HTTP_WRITE_TIMEOUT",
+                label="写入超时",
+                description="向网络套接字写入请求数据的最大时间。",
+                value_type="float",
+                default_value=10.0,
+                input_type="number",
+                min_value=0.1,
+                placeholder="10.0",
+                db_persist=False,
+            ),
+            ConfigFieldSpec(
+                key="HTTP_POOL_TIMEOUT",
+                label="连接池等待超时",
+                description="从 HTTP 连接池获取可用连接的最大等待时间。",
+                value_type="float",
+                default_value=5.0,
+                input_type="number",
+                min_value=0.1,
+                placeholder="5.0",
+                db_persist=False,
+            ),
+            ConfigFieldSpec(
+                key="HTTP_DEFAULT_READ_TIMEOUT",
+                label="非流式读取超时",
+                description="普通请求（如鉴权、获取模型列表）的单次读取超时时间。",
+                value_type="float",
+                default_value=60.0,
+                input_type="number",
+                min_value=1.0,
+                placeholder="60.0",
+                db_persist=False,
+            ),
+            ConfigFieldSpec(
+                key="HTTP_STREAM_READ_TIMEOUT",
+                label="流式单步读取超时",
+                description="流式聊天中，相邻两个数据块(chunk)之间允许的最大静默时间。",
+                value_type="float",
+                default_value=120.0,
+                input_type="number",
+                min_value=1.0,
+                placeholder="120.0",
+                db_persist=False,
+            ),
+            ConfigFieldSpec(
+                key="HTTP_MODEL_FETCH_TIMEOUT",
+                label="模型拉取超时",
+                description="请求上游 /v1/models 接口的超时时间。",
+                value_type="float",
+                default_value=10.0,
+                input_type="number",
+                min_value=1.0,
+                placeholder="10.0",
+                db_persist=False,
+            ),
+            ConfigFieldSpec(
+                key="CHAT_TOTAL_TIMEOUT",
+                label="非流式端到端总超时",
+                description="单次非流式聊天请求的总处理时间上限（包含所有内部重试）。",
+                value_type="float",
+                default_value=300.0,
+                input_type="number",
+                min_value=1.0,
+                placeholder="300.0",
+                db_persist=False,
+                wide=True,
+            ),
+            ConfigFieldSpec(
+                key="HTTP_STREAM_TOTAL_TIMEOUT",
+                label="流式端到端总超时",
+                description="单次流式聊天请求的总处理时间上限（包含首包等待及所有抛出数据的总耗时）。",
+                value_type="float",
+                default_value=600.0,
+                input_type="number",
+                min_value=1.0,
+                placeholder="600.0",
+                db_persist=False,
+                wide=True,
+            ),
+        ),
+    ),
+    ConfigSectionSpec(
         id="admin",
         title="后台安全",
         description="管理后台密码和会话密钥。修改后建议重新登录。",
@@ -570,6 +667,11 @@ def _parse_db_value(raw: str, value_type: str) -> Any:
     if value_type == "int":
         try:
             return int(raw)
+        except (ValueError, TypeError):
+            return None
+    if value_type == "float":
+        try:
+            return float(raw)
         except (ValueError, TypeError):
             return None
     return raw
@@ -740,6 +842,23 @@ def build_form_updates(form_data: Mapping[str, Any]) -> dict[str, object]:
                     f"{field.label} 不能大于 {field.max_value}。"
                 )
             updates[key] = parsed
+            continue
+
+        if field.value_type == "float":
+            try:
+                parsed_float = float(raw_value)
+            except ValueError as exc:
+                raise ValueError(f"{field.label} 必须是数字。") from exc
+
+            if field.min_value is not None and parsed_float < field.min_value:
+                raise ValueError(
+                    f"{field.label} 不能小于 {field.min_value}。"
+                )
+            if field.max_value is not None and parsed_float > field.max_value:
+                raise ValueError(
+                    f"{field.label} 不能大于 {field.max_value}。"
+                )
+            updates[key] = parsed_float
             continue
 
         updates[key] = raw_value

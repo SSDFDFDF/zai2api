@@ -179,16 +179,16 @@ class ModelManager:
             },
         }
 
-    def get_upstream_model_id(self, model_name: str) -> str:
+    def get_upstream_model_id(self, model_name: str) -> Optional[str]:
         """获取上游实际模型 ID。
 
         Args:
             model_name: 外部模型名称（如 "GLM-4.5"）。
 
         Returns:
-            上游模型 ID，未匹配时降级到默认值 "0727-360B-API"。
+            上游模型 ID，未匹配时返回 None。
         """
-        return self.model_mapping.get(model_name, "0727-360B-API")
+        return self.model_mapping.get(model_name)
 
     def get_mcp_servers(self, model_name: str) -> List[str]:
         """获取模型的默认 MCP 服务器列表。
@@ -291,6 +291,8 @@ class ModelManager:
 
         # 获取上游模型 ID
         upstream_model_id = self.get_upstream_model_id(requested_model)
+        if upstream_model_id is None:
+            raise ValueError(f"不支持的模型: {requested_model}")
 
         # mcp_servers: 客户端透传优先
         mcp_servers = (
