@@ -13,9 +13,7 @@ from app.models.db_models import RequestLog
 from app.utils.logger import logger
 
 
-def _format_sqlite_datetime(value: datetime) -> str:
-    """格式化为 SQLite `CURRENT_TIMESTAMP` 兼容的时间字符串。"""
-    return value.strftime("%Y-%m-%d %H:%M:%S")
+
 
 def _normalize_trend_window(window: Optional[str], days: Optional[int]) -> str:
     """统一趋势窗口参数，兼容旧版 `days` 调用。"""
@@ -240,16 +238,13 @@ class RequestLogDAO:
         trend_window = _normalize_trend_window(window, days)
         current_time = now or datetime.utcnow()
         async with self.session_factory() as session:
-            is_postgres = session.bind.dialect.name == "postgresql" if session.bind else False
+            is_pg = self._is_postgres(session)
             
             if trend_window == "24h":
                 bucket_count = 24
                 current_hour = current_time.replace(minute=0, second=0, microsecond=0)
                 start_time = current_hour - timedelta(hours=bucket_count - 1)
-                if is_postgres:
-                    bucket_expression = "to_char(timestamp, 'YYYY-MM-DD HH24:00:00')"
-                else:
-                    bucket_expression = "strftime('%Y-%m-%d %H:00:00', timestamp)"
+                bucket_expression = self._hourly_bucket_expr(is_pg)
                 
                 row_key = "trend_bucket"
                 label_format = "%H:%M"
@@ -273,10 +268,7 @@ class RequestLogDAO:
             start_date = current_time.date() - timedelta(days=bucket_count - 1)
             start_time = datetime.combine(start_date, datetime.min.time())
             
-            if is_postgres:
-                bucket_expression = "DATE(timestamp)"
-            else:
-                bucket_expression = "DATE(timestamp)"
+            bucket_expression = "DATE(timestamp)"
             
             rows = await self._query_usage_trend_rows(session, provider, start_time, bucket_expression, "trend_bucket")
             rows_by_bucket = {str(row["trend_bucket"])[:10]: dict(row) for row in rows}
@@ -293,6 +285,16 @@ class RequestLogDAO:
                 ))
             return trend
 
+    @staticmethod
+    def _is_postgres(session) -> bool:
+        return session.bind.dialect.name == "postgresql" if session.bind else False
+
+    @staticmethod
+    def _hourly_bucket_expr(is_postgres: bool) -> str:
+        if is_postgres:
+            return "to_char(timestamp, 'YYYY-MM-DD HH24:00:00')"
+        return "strftime('%Y-%m-%d %H:00:00', timestamp)"
+
     async def _query_usage_trend_rows(self, session, provider: Optional[str], start_time: datetime, bucket_expression: str, bucket_alias: str):
         query = f"""
             SELECT
@@ -307,7 +309,7 @@ class RequestLogDAO:
             FROM request_logs
             WHERE timestamp >= :start_time
         """
-        params = {"start_time": _format_sqlite_datetime(start_time)}
+        params = {"start_time": start_time}
         if provider:
             query += " AND provider = :provider"
             params["provider"] = provider
@@ -357,7 +359,7 @@ class RequestLogDAO:
             ORDER BY total DESC
         """
         async with self.session_factory() as session:
-            result = await session.execute(text(query), {"start_time": _format_sqlite_datetime(start_time)})
+            result = await session.execute(text(query), {"start_time": start_time})
             rows = result.mappings().all()
 
             out = {}

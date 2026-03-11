@@ -360,7 +360,7 @@ class TokenDAO:
                 query = text("""
                     SELECT
                         COUNT(*) as total_tokens,
-                        SUM(CASE WHEN is_enabled = 1 THEN 1 ELSE 0 END) as enabled_tokens,
+                        SUM(CASE WHEN is_enabled = true THEN 1 ELSE 0 END) as enabled_tokens,
                         SUM(ts.total_requests) as total_requests,
                         SUM(ts.successful_requests) as successful_requests,
                         SUM(ts.failed_requests) as failed_requests
@@ -384,7 +384,7 @@ class TokenDAO:
                 query = text("""
                     SELECT
                         COUNT(*) as total_tokens,
-                        SUM(CASE WHEN is_enabled = 1 THEN 1 ELSE 0 END) as enabled_tokens,
+                        SUM(CASE WHEN is_enabled = true THEN 1 ELSE 0 END) as enabled_tokens,
                         SUM(CASE WHEN token_type = 'user' THEN 1 ELSE 0 END) as user_tokens,
                         SUM(CASE WHEN token_type = 'guest' THEN 1 ELSE 0 END) as guest_tokens,
                         SUM(CASE WHEN token_type = 'unknown' THEN 1 ELSE 0 END) as unknown_tokens

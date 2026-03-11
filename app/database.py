@@ -74,7 +74,7 @@ def get_db_url(db_url: str = None) -> tuple[str, dict]:
 
 # 全局引擎和会话工厂
 _db_url, _connect_args = get_db_url()
-engine = create_async_engine(_db_url, echo=False, connect_args=_connect_args)
+engine = create_async_engine(_db_url, echo=False, pool_pre_ping=True, connect_args=_connect_args)
 async_session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 async def init_db():

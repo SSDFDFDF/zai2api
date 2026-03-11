@@ -24,7 +24,7 @@ class Token(Base):
     token = mapped_column(String, nullable=False)
     token_type = mapped_column(String, default="user", nullable=False)
     priority = mapped_column(Integer, default=0, server_default="0", nullable=False)
-    is_enabled = mapped_column(Boolean, default=True, server_default="1", nullable=False)
+    is_enabled = mapped_column(Boolean, default=True, server_default="true", nullable=False)
     created_at = mapped_column(DateTime, default=func.now(), server_default=func.now(), nullable=False)
 
     __table_args__ = (
