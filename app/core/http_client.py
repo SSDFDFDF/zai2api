@@ -21,7 +21,8 @@ def get_proxy_config() -> Optional[str]:
     统一获取全局的网络代理。支持 http(s):// 或 socks5://。
     返回 httpx 接受的代理 URL 字符串，无代理时返回 None。
     """
-    return settings.HTTP_PROXY
+    proxy = settings.HTTP_PROXY
+    return proxy if proxy else None
 
 
 def build_timeout(read_timeout: float = 300.0) -> httpx.Timeout:

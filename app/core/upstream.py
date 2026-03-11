@@ -761,7 +761,7 @@ class UpstreamClient:
             max_attempts = await self._get_total_retry_limit()
 
             if request.stream:
-                return self._create_stream_response(request, transformed)
+                return await self._create_stream_response(request, transformed)
 
             client = self._get_shared_client()
             excluded_tokens: Set[str] = set()
@@ -869,138 +869,159 @@ class UpstreamClient:
         self,
         request: OpenAIRequest,
         transformed: Dict[str, Any],
-    ) -> AsyncGenerator[str, None]:
+    ) -> Union[Dict[str, Any], AsyncGenerator[str, None]]:
         """创建流式响应，并在首包前支持双池重试。"""
         max_attempts = await self._get_total_retry_limit()
         excluded_tokens: Set[str] = set()
         excluded_guest_user_ids: Set[str] = set()
         current_token = str(transformed.get("token") or "")
 
-        try:
-            client = self._get_shared_stream_client()
-            for attempt in range(max_attempts):
-                self.logger.debug(f"🎯 发送请求到上游: {transformed['url']}")
-                async with client.stream(
-                    "POST",
-                    transformed["url"],
-                    json=transformed["body"],
-                    headers=transformed["headers"],
-                ) as response:
-                    error_text = (
-                        await response.aread() if response.status_code != 200 else b""
-                    )
-                    error_msg = error_text.decode("utf-8", errors="ignore")
-                    error_code, parsed_error_message = (
-                        extract_upstream_error_details(
-                            response.status_code,
-                            error_msg,
-                        )
-                        if response.status_code != 200
-                        else (None, "")
-                    )
-                    is_concurrency_limited_flag = is_concurrency_limited(
-                        response.status_code,
-                        error_code,
-                        parsed_error_message,
-                    )
+        client = self._get_shared_stream_client()
 
-                    if self._should_retry_guest_session(
+        for attempt in range(max_attempts):
+            self.logger.debug(f"🎯 发送请求到上游: {transformed['url']}")
+            req = client.build_request(
+                "POST",
+                transformed["url"],
+                json=transformed["body"],
+                headers=transformed["headers"],
+            )
+
+            try:
+                response = await client.send(req, stream=True)
+            except Exception as e:
+                self.logger.error(f"❌ 连接异常: {e}")
+                import traceback
+                self.logger.error(traceback.format_exc())
+                if self._is_guest_auth(transformed):
+                    await self._release_guest_session(transformed)
+                elif current_token:
+                    await self.mark_token_failure(current_token, e)
+                return {
+                    "error": {
+                        "message": str(e),
+                        "type": "stream_error",
+                    }
+                }
+
+            try:
+                error_text = (
+                    await response.aread() if response.status_code != 200 else b""
+                )
+                error_msg = error_text.decode("utf-8", errors="ignore")
+                error_code, parsed_error_message = (
+                    extract_upstream_error_details(
                         response.status_code,
-                        is_concurrency_limited_flag,
+                        error_msg,
+                    )
+                    if response.status_code != 200
+                    else (None, "")
+                )
+                is_concurrency_limited_flag = is_concurrency_limited(
+                    response.status_code,
+                    error_code,
+                    parsed_error_message,
+                )
+
+                if self._should_retry_guest_session(
+                    response.status_code,
+                    is_concurrency_limited_flag,
+                    attempt,
+                    max_attempts,
+                    transformed,
+                ):
+                    await response.aclose()
+                    guest_user_id = str(
+                        transformed.get("guest_user_id")
+                        or transformed.get("user_id")
+                        or ""
+                    )
+                    if guest_user_id:
+                        excluded_guest_user_ids.add(guest_user_id)
+                    transformed = await self._refresh_guest_request(
+                        request,
                         attempt,
-                        max_attempts,
+                        excluded_tokens,
+                        excluded_guest_user_ids,
                         transformed,
-                    ):
-                        guest_user_id = str(
-                            transformed.get("guest_user_id")
-                            or transformed.get("user_id")
-                            or ""
-                        )
-                        if guest_user_id:
-                            excluded_guest_user_ids.add(guest_user_id)
-                        transformed = await self._refresh_guest_request(
-                            request,
-                            attempt,
-                            excluded_tokens,
-                            excluded_guest_user_ids,
-                            transformed,
-                            is_concurrency_limited=is_concurrency_limited_flag,
-                        )
-                        current_token = str(transformed.get("token") or "")
-                        continue
+                        is_concurrency_limited=is_concurrency_limited_flag,
+                    )
+                    current_token = str(transformed.get("token") or "")
+                    continue
 
-                    if self._should_retry_authenticated_session(
-                        response.status_code,
-                        is_concurrency_limited_flag,
+                if self._should_retry_authenticated_session(
+                    response.status_code,
+                    is_concurrency_limited_flag,
+                    attempt,
+                    max_attempts,
+                    transformed,
+                ):
+                    await response.aclose()
+                    if current_token:
+                        excluded_tokens.add(current_token)
+                        await self.mark_token_failure(
+                            current_token,
+                            Exception(
+                                parsed_error_message or "上游认证会话不可用"
+                            ),
+                        )
+                        self.logger.warning(
+                            "⚠️ 流式请求命中认证会话限制，准备切号/回退匿名池: "
+                            f"{current_token[:20]}..."
+                        )
+                    transformed = await self._refresh_authenticated_request(
+                        request,
                         attempt,
-                        max_attempts,
-                        transformed,
-                    ):
-                        if current_token:
-                            excluded_tokens.add(current_token)
-                            await self.mark_token_failure(
-                                current_token,
-                                Exception(
-                                    parsed_error_message or "上游认证会话不可用"
-                                ),
-                            )
-                            self.logger.warning(
-                                "⚠️ 流式请求命中认证会话限制，准备切号/回退匿名池: "
-                                f"{current_token[:20]}..."
-                            )
-                        transformed = await self._refresh_authenticated_request(
-                            request,
-                            attempt,
-                            excluded_tokens,
-                            excluded_guest_user_ids,
+                        excluded_tokens,
+                        excluded_guest_user_ids,
+                    )
+                    current_token = str(transformed.get("token") or "")
+                    continue
+
+                if response.status_code != 200:
+                    await response.aclose()
+                    self.logger.error(f"❌ 上游返回错误: {response.status_code}")
+                    if error_msg:
+                        self.logger.error(f"❌ 错误详情: {error_msg}")
+
+                    if not self._is_guest_auth(transformed) and current_token:
+                        await self.mark_token_failure(
+                            current_token,
+                            Exception(
+                                parsed_error_message
+                                or f"Upstream error: {response.status_code}"
+                            ),
                         )
-                        current_token = str(transformed.get("token") or "")
-                        continue
+                    await self._release_guest_session(transformed)
 
-                    if response.status_code != 200:
-                        self.logger.error(f"❌ 上游返回错误: {response.status_code}")
-                        if error_msg:
-                            self.logger.error(f"❌ 错误详情: {error_msg}")
-
-                        if not self._is_guest_auth(transformed) and current_token:
-                            await self.mark_token_failure(
-                                current_token,
-                                Exception(
-                                    parsed_error_message
-                                    or f"Upstream error: {response.status_code}"
+                    if response.status_code == 405:
+                        self.logger.error(
+                            "🚫 请求被上游 WAF 拦截，可能是请求头或签名异常"
+                        )
+                        return {
+                            "error": {
+                                "message": (
+                                    "请求被上游WAF拦截(405 Method Not Allowed),"
+                                    "可能是请求头或签名异常,请稍后重试..."
                                 ),
-                            )
-                        await self._release_guest_session(transformed)
-
-                        if response.status_code == 405:
-                            self.logger.error(
-                                "🚫 请求被上游 WAF 拦截，可能是请求头或签名异常"
-                            )
-                            error_response = {
-                                "error": {
-                                    "message": (
-                                        "请求被上游WAF拦截(405 Method Not Allowed),"
-                                        "可能是请求头或签名异常,请稍后重试..."
-                                    ),
-                                    "type": "waf_blocked",
-                                    "code": 405,
-                                }
+                                "type": "waf_blocked",
+                                "code": 405,
                             }
-                        else:
-                            error_response = {
-                                "error": {
-                                    "message": parsed_error_message
-                                    or f"Upstream error: {response.status_code}",
-                                    "type": "upstream_error",
-                                    "code": error_code or response.status_code,
-                                }
+                        }
+                    else:
+                        return {
+                            "error": {
+                                "message": parsed_error_message
+                                or f"Upstream error: {response.status_code}",
+                                "type": "upstream_error",
+                                "code": error_code or response.status_code,
                             }
-                        yield f"data: {json.dumps(error_response)}\n\n"
-                        yield "data: [DONE]\n\n"
-                        return
+                        }
 
-                    chat_id = transformed["chat_id"]
-                    model = transformed["model"]
+                chat_id = transformed["chat_id"]
+                model = transformed["model"]
+                
+                async def stream_generator() -> AsyncGenerator[str, None]:
                     try:
                         async for chunk in self._response_handler.handle_stream_response(
                             response,
@@ -1010,33 +1031,58 @@ class UpstreamClient:
                             transformed,
                         ):
                             yield chunk
+                    except Exception as e:
+                        self.logger.error(f"❌ 流处理错误: {e}")
+                        import traceback
+                        self.logger.error(traceback.format_exc())
+                        if self._is_guest_auth(transformed):
+                            await self._release_guest_session(transformed)
+                        elif current_token:
+                            await self.mark_token_failure(current_token, e)
+                        
+                        error_response = {
+                            "error": {
+                                "message": str(e),
+                                "type": "stream_error",
+                            }
+                        }
+                        yield f"data: {json.dumps(error_response)}\n\n"
+                        yield "data: [DONE]\n\n"
                     finally:
+                        await response.aclose()
                         await self._release_guest_session(transformed)
+                        if not self._is_guest_auth(transformed) and current_token:
+                            token_pool = get_token_pool()
+                            if token_pool:
+                                await token_pool.record_token_success(current_token)
 
-                    if not self._is_guest_auth(transformed) and current_token:
-                        token_pool = get_token_pool()
-                        if token_pool:
-                            await token_pool.record_token_success(current_token)
-                    return
+                return stream_generator()
 
-        except Exception as e:
-            self.logger.error(f"❌ 流处理错误: {e}")
-            import traceback
-            self.logger.error(traceback.format_exc())
-            if self._is_guest_auth(transformed):
-                await self._release_guest_session(transformed)
-            elif current_token:
-                await self.mark_token_failure(current_token, e)
-
-            error_response = {
-                "error": {
-                    "message": str(e),
-                    "type": "stream_error",
+            except Exception as e:
+                if 'response' in locals() and response:
+                    await response.aclose()
+                self.logger.error(f"❌ 流处理错误: {e}")
+                import traceback
+                self.logger.error(traceback.format_exc())
+                if self._is_guest_auth(transformed):
+                    await self._release_guest_session(transformed)
+                elif current_token:
+                    await self.mark_token_failure(current_token, e)
+                
+                return {
+                    "error": {
+                        "message": str(e),
+                        "type": "stream_error",
+                    }
                 }
+
+        return {
+            "error": {
+                "message": "Max retry attempts exhausted.",
+                "type": "stream_error",
+                "code": 500
             }
-            yield f"data: {json.dumps(error_response)}\n\n"
-            yield "data: [DONE]\n\n"
-            return
+        }
 
     async def transform_response(
         self,
