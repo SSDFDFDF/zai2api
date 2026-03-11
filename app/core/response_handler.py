@@ -211,7 +211,7 @@ class ResponseHandler:
         has_tools = settings.TOOL_SUPPORT and bool(request.tools) and bool(trigger_signal)
 
         buffered_content = ""
-        usage_info: Dict[str, int] = {
+        usage_info: Dict[str, Any] = {
             "prompt_tokens": 0,
             "completion_tokens": 0,
             "total_tokens": 0,
@@ -420,6 +420,10 @@ class ResponseHandler:
 
                 if data.get("usage"):
                     usage_info = data["usage"]
+                    self.logger.debug(f"🔍 [usage] 解析到 data.usage: {usage_info}")
+                elif chunk.get("usage"):
+                    usage_info = chunk["usage"]
+                    self.logger.debug(f"🔍 [usage] 解析到 chunk.usage: {usage_info}")
 
                 # 累积内容
                 current_text = ""
@@ -697,7 +701,7 @@ class ResponseHandler:
         final_content = ""
         reasoning_content = ""
         tool_calls_accum: List[Dict[str, Any]] = []
-        usage_info: Dict[str, int] = {
+        usage_info: Dict[str, Any] = {
             "prompt_tokens": 0,
             "completion_tokens": 0,
             "total_tokens": 0,
@@ -749,6 +753,10 @@ class ResponseHandler:
 
                 if data.get("usage"):
                     usage_info = data["usage"]
+                    self.logger.info(f"🔍 [Non-Stream] 解析到 data.usage: {usage_info}")
+                elif chunk.get("usage"):
+                    usage_info = chunk["usage"]
+                    self.logger.info(f"🔍 [Non-Stream] 解析到 chunk.usage: {usage_info}")
 
                 if phase == "thinking" and delta_content:
                     reasoning_content += self.clean_reasoning_delta(delta_content)

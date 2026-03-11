@@ -315,16 +315,25 @@ def sse_content_block_stop(index: int) -> str:
 def sse_message_delta(
     stop_reason: str,
     output_tokens: int,
+    cache_creation_tokens: int = 0,
+    cache_read_tokens: int = 0,
+    input_tokens: Optional[int] = None,
 ) -> str:
     """Create Claude message_delta SSE event."""
+    usage: dict[str, int] = {"output_tokens": output_tokens}
+    if input_tokens is not None and input_tokens > 0:
+        usage["input_tokens"] = input_tokens
+    if cache_creation_tokens > 0:
+        usage["cache_creation_input_tokens"] = cache_creation_tokens
+    if cache_read_tokens > 0:
+        usage["cache_read_input_tokens"] = cache_read_tokens
+
     return sse(
         "message_delta",
         {
             "type": "message_delta",
             "delta": {"stop_reason": stop_reason, "stop_sequence": None},
-            "usage": {
-                "output_tokens": output_tokens,
-            },
+            "usage": usage,
         },
     )
 

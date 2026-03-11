@@ -87,6 +87,12 @@ class Settings(BaseSettings):
     )
     TOOL_SUPPORT: bool = os.getenv("TOOL_SUPPORT", "true").lower() == "true"
     SCAN_LIMIT: int = int(os.getenv("SCAN_LIMIT", "200000"))
+
+    # Session / Continuous Conversation Configuration
+    SESSION_ENABLED: bool = os.getenv("SESSION_ENABLED", "true").lower() == "true"
+    SESSION_TTL: int = int(os.getenv("SESSION_TTL", "3600"))           # 会话 TTL（秒）
+    SESSION_MAX_PER_CLIENT: int = int(os.getenv("SESSION_MAX_PER_CLIENT", "50"))  # 每客户端最大会话数
+    SESSION_CLEANUP_INTERVAL: int = int(os.getenv("SESSION_CLEANUP_INTERVAL", "300"))  # 清理间隔（秒）
     SKIP_AUTH_TOKEN: bool = os.getenv("SKIP_AUTH_TOKEN", "false").lower() == "true"
 
     # HTTP Timeout Configuration (单位: 秒)

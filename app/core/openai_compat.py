@@ -47,7 +47,7 @@ def create_openai_response(
     chat_id: str,
     model: str,
     content: str,
-    usage: Optional[Dict[str, int]] = None,
+    usage: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """创建 OpenAI 格式的非流式响应。"""
     return {
@@ -78,7 +78,7 @@ def create_openai_response_with_reasoning(
     model: str,
     content: str,
     reasoning_content: Optional[str] = None,
-    usage: Optional[Dict[str, int]] = None,
+    usage: Optional[Dict[str, Any]] = None,
     tool_calls: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """创建包含 reasoning/tool_calls 的 OpenAI 响应。"""

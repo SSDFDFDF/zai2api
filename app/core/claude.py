@@ -368,8 +368,11 @@ async def _stream_openai_to_claude(
             )
 
         yield sse_message_delta(
-            "tool_use" if tool_calls_dict else "end_turn",
-            final_output_tokens,
+            stop_reason="tool_use" if tool_calls_dict else "end_turn",
+            output_tokens=final_output_tokens,
+            cache_creation_tokens=cache_creation_tokens,
+            cache_read_tokens=cache_read_tokens,
+            input_tokens=final_input_tokens,
         )
         yield sse_message_stop()
     except Exception as exc:

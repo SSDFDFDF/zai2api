@@ -352,7 +352,7 @@ class RequestLogDAO:
                 SUM(output_tokens) as output_tokens,
                 SUM(total_tokens) as total_tokens,
                 AVG(duration) as avg_duration,
-                AVG(first_token_time) as avg_first_token_time
+                AVG(CASE WHEN first_token_time > 0 THEN first_token_time ELSE NULL END) as avg_first_token_time
             FROM request_logs
             WHERE timestamp >= :start_time
             GROUP BY model

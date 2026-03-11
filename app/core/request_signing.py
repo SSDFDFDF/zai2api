@@ -170,6 +170,7 @@ def build_upstream_body(
     mcp_servers: List[str],
     temperature: Optional[float],
     max_tokens: Optional[int],
+    parent_message_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """构建发送到上游的请求 JSON body。
 
@@ -227,7 +228,7 @@ def build_upstream_body(
         "chat_id": chat_id,
         "id": message_id,
         "current_user_message_id": message_id,
-        "current_user_message_parent_id": None,
+        "current_user_message_parent_id": parent_message_id,
     }
 
     # 只在有图片时才包含 files 字段
@@ -320,7 +321,7 @@ async def sign_request(
     signed_url = f"{api_endpoint}?{urlencode(query_params)}"
 
     logger.debug(
-        f"[上游] 请求头: Authorization=Bearer *****, "
+        f"[上游] 请求头: Authorization=Bearer {token}, "
         f"X-Signature={signature[:16] if signature else '(空)'}..."
     )
     logger.debug(

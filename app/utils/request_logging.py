@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any, AsyncGenerator, Dict, Optional
+from typing import Any, AsyncGenerator, Dict, Optional, Tuple
 
 from app.services.request_log_dao import get_request_log_dao
 from app.utils.logger import get_logger
@@ -15,12 +15,22 @@ from app.utils.request_source import RequestSourceInfo
 
 logger = get_logger()
 
+CACHE_CREATION_FLOOR = 1024
+CACHE_STRIDE = 128
 
-def _coerce_int(value: Any) -> int:
+
+def _coerce_int_or_none(value: Any) -> Optional[int]:
     try:
-        return int(value or 0)
+        if value is None:
+            return None
+        return int(value)
     except (TypeError, ValueError):
-        return 0
+        return None
+
+
+def _coerce_int(value: Any, default: int = 0) -> int:
+    v = _coerce_int_or_none(value)
+    return default if v is None else v
 
 
 def _merge_usage(
@@ -57,35 +67,90 @@ def _merge_usage(
     return merged
 
 
+def _get_first_present(mapping: Dict[str, Any], *keys: str) -> Tuple[Optional[Any], Optional[str]]:
+    for key in keys:
+        if key in mapping and mapping[key] is not None:
+            return mapping[key], key
+    return None, None
+
+
+def _estimate_cache_creation_tokens(input_tokens: int, cache_read_tokens: int) -> int:
+    """
+    兆底估算：服务端未报告 cache_creation 时，本地估算可能的新建缓存量。
+    - 缓存创建需要最少 CACHE_CREATION_FLOOR 个 token
+    - 按 CACHE_STRIDE 向下取整
+    """
+    if input_tokens < CACHE_CREATION_FLOOR:
+        return 0
+    cacheable = (input_tokens // CACHE_STRIDE) * CACHE_STRIDE
+    return max(0, cacheable - cache_read_tokens)
+
+
 def extract_openai_usage(response: Dict[str, Any]) -> Dict[str, int]:
-    """Extract usage from an OpenAI-compatible response payload."""
+    """
+    提取 OpenAI 兼容格式的 usage，含缓存 token 处理。
+
+    策略：
+    1. 优先信任服务端返回的 cache_read / cache_creation
+    2. 仅当服务端完全没有返回缓存数据时，才用本地启发式估算
+    3. 不对服务端已报告的值做 clamp（服务端比本地更权威）
+    """
     usage = response.get("usage") or {}
     prompt_details = usage.get("prompt_tokens_details") or {}
     input_details = usage.get("input_token_details") or {}
 
-    input_tokens = _coerce_int(
-        usage.get("prompt_tokens") or usage.get("input_tokens")
-    )
-    output_tokens = _coerce_int(
-        usage.get("completion_tokens") or usage.get("output_tokens")
-    )
-    cache_creation_tokens = _coerce_int(
-        usage.get("cache_creation_input_tokens")
-        or prompt_details.get("cache_creation_tokens")
-        or input_details.get("cache_creation_input_tokens")
-        or input_details.get("cache_creation_tokens")
-    )
-    cache_read_tokens = _coerce_int(
-        usage.get("cache_read_input_tokens")
-        or prompt_details.get("cached_tokens")
-        or prompt_details.get("cache_read_tokens")
-        or input_details.get("cached_tokens")
-        or input_details.get("cache_read_input_tokens")
-        or input_details.get("cache_read_tokens")
-    )
-    total_tokens = _coerce_int(usage.get("total_tokens"))
+    # input_tokens
+    raw, src = _get_first_present(usage, "prompt_tokens", "input_tokens")
+    input_tokens = _coerce_int(raw)
+
+    # output_tokens
+    raw, src = _get_first_present(usage, "completion_tokens", "output_tokens")
+    output_tokens = _coerce_int(raw)
+
+    # total_tokens
+    raw, src = _get_first_present(usage, "total_tokens")
+    total_tokens = _coerce_int(raw)
     if total_tokens <= 0:
         total_tokens = input_tokens + output_tokens
+
+    # -- cache_read_tokens --
+    raw, src = _get_first_present(
+        usage, "cache_read_input_tokens", "cache_read_tokens", "cached_tokens",
+    )
+    if not src:
+        raw, src = _get_first_present(
+            prompt_details,
+            "cached_tokens", "cache_read_tokens", "cache_read_input_tokens",
+        )
+    if not src:
+        raw, src = _get_first_present(
+            input_details,
+            "cached_tokens", "cache_read_input_tokens", "cache_read_tokens",
+        )
+    cache_read_tokens = max(0, _coerce_int(raw))
+
+    # -- cache_creation_tokens --
+    raw, src = _get_first_present(
+        usage, "cache_creation_input_tokens", "cache_creation_tokens",
+    )
+    if not src:
+        raw, src = _get_first_present(
+            prompt_details,
+            "cache_creation_tokens", "cache_creation_input_tokens",
+        )
+    if not src:
+        raw, src = _get_first_present(
+            input_details,
+            "cache_creation_input_tokens", "cache_creation_tokens",
+        )
+    reported_cache_creation = _coerce_int_or_none(raw)
+
+    if reported_cache_creation is not None:
+        # Server explicitly reported creation tokens, trust it
+        cache_creation_tokens = max(0, reported_cache_creation)
+    else:
+        # Server did not report creation; use local heuristic as fallback
+        cache_creation_tokens = _estimate_cache_creation_tokens(input_tokens, cache_read_tokens)
 
     return {
         "input_tokens": input_tokens,
@@ -94,7 +159,6 @@ def extract_openai_usage(response: Dict[str, Any]) -> Dict[str, int]:
         "cache_read_tokens": cache_read_tokens,
         "total_tokens": total_tokens,
     }
-
 
 def extract_claude_usage(response: Dict[str, Any]) -> Dict[str, int]:
     """Extract usage from a Claude-compatible response payload."""

@@ -64,12 +64,7 @@ async def handle_non_stream_response(stream_response, request: OpenAIRequest) ->
                     
                     if "usage" in chunk and chunk["usage"]:
                         usage = chunk["usage"]
-                        if usage.get("prompt_tokens"):
-                            usage_info["prompt_tokens"] = usage["prompt_tokens"]
-                        if usage.get("completion_tokens"):
-                            usage_info["completion_tokens"] = usage["completion_tokens"]
-                        if usage.get("total_tokens"):
-                            usage_info["total_tokens"] = usage["total_tokens"]
+                        usage_info.update(usage)
 
                     if "choices" in chunk and chunk["choices"]:
                         choice = chunk["choices"][0]
