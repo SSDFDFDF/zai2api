@@ -1069,7 +1069,28 @@ class UpstreamClient:
                 
                 async def stream_generator() -> AsyncGenerator[str, None]:
                     success = False
+                    disconnect_task: Optional[asyncio.Task] = None
+
+                    async def _wait_for_disconnect() -> None:
+                        """后台任务：每 0.5s 轮询一次，检测到客户端断开后
+                        立即关闭上游 HTTP 响应，使 aiter_lines() 退出。"""
+                        try:
+                            while True:
+                                if await http_request.is_disconnected():
+                                    self.logger.info(
+                                        f"[stream] client disconnected, "
+                                        f"closing upstream stream (chat_id={chat_id})"
+                                    )
+                                    await response.aclose()
+                                    return
+                                await asyncio.sleep(0.5)
+                        except asyncio.CancelledError:
+                            pass  # 正常取消，静默退出
+
                     try:
+                        if http_request is not None:
+                            disconnect_task = asyncio.create_task(_wait_for_disconnect())
+
                         async for chunk in self._response_handler.handle_stream_response(
                             response,
                             chat_id,
@@ -1077,17 +1098,13 @@ class UpstreamClient:
                             request,
                             transformed,
                         ):
-                            # 检测客户端是否已断开
-                            if http_request is not None:
-                                if await http_request.is_disconnected():
-                                    self.logger.info(
-                                        f"[stream] client disconnected, break upstream stream (chat_id={chat_id})"
-                                    )
-                                    break
                             yield chunk
-                        else:
-                            # 正常迭代完毕（未 break）
-                            success = True
+                        # 正常迭代完毕
+                        success = True
+                    except asyncio.CancelledError:
+                        self.logger.info(
+                            f"[stream] stream task cancelled (chat_id={chat_id})"
+                        )
                     except Exception as e:
                         friendly_msg = get_error_message(e)
                         self.logger.error(f"❌ 流处理错误: {friendly_msg} (raw: {e})")
@@ -1103,6 +1120,13 @@ class UpstreamClient:
                         yield f"data: {json.dumps(error_response)}\n\n"
                         yield "data: [DONE]\n\n"
                     finally:
+                        # 取消断连监听 task（流正常完成时）
+                        if disconnect_task is not None and not disconnect_task.done():
+                            disconnect_task.cancel()
+                            try:
+                                await disconnect_task
+                            except asyncio.CancelledError:
+                                pass
                         await response.aclose()
                         await self._release_guest_session(transformed)
                         if success and not self._is_guest_auth(transformed) and current_token:

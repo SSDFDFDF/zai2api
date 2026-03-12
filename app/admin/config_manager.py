@@ -492,6 +492,14 @@ CONFIG_SECTIONS: tuple[ConfigSectionSpec, ...] = (
                 required=True,
                 wide=True,
             ),
+            ConfigFieldSpec(
+                key="GLM_INTERNAL_TOOL_HINT_ENABLED",
+                label="启用 GLM 内部工具提示",
+                description="向客户端展示模型后台隐式调用的工具（如 [联网检索]、[打开网页]）过程和完成状态。",
+                value_type="bool",
+                default_value=False,
+                wide=True,
+            ),
         ),
     ),
     ConfigSectionSpec(

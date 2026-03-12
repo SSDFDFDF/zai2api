@@ -87,6 +87,9 @@ class Settings(BaseSettings):
     )
     TOOL_SUPPORT: bool = os.getenv("TOOL_SUPPORT", "true").lower() == "true"
     SCAN_LIMIT: int = int(os.getenv("SCAN_LIMIT", "200000"))
+    GLM_INTERNAL_TOOL_HINT_ENABLED: bool = (
+        os.getenv("GLM_INTERNAL_TOOL_HINT_ENABLED", "false").lower() == "true"
+    )
 
     # File Upload
     # 上传文件大小限制（字节），默认 10MB，0 表示不限制
