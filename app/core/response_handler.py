@@ -1158,9 +1158,6 @@ class ResponseHandler:
 
         except Exception as e:
             self.logger.error(f"❌ 流式响应处理错误: {e}")
-            import traceback
-
-            self.logger.error(traceback.format_exc())
             if not ctx.finished:
                 yield format_sse_chunk(
                     create_openai_chunk(
@@ -1334,9 +1331,6 @@ class ResponseHandler:
 
         except Exception as e:
             self.logger.error(f"❌ 非流式响应处理错误: {e}")
-            import traceback
-
-            self.logger.error(traceback.format_exc())
             return handle_error(e, "非流式聚合")
 
         # 优先尝试 XML 解析
