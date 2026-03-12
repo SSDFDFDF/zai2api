@@ -125,6 +125,36 @@ class ResponseHandler:
 
         return text
 
+    # ------------------------------------------------------------------
+    # 重复循环检测
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _detect_repetition_loop(
+        text: str,
+        min_pattern_len: int = 10,
+        min_repeats: int = 8,
+        max_pattern_len: int = 60,
+    ) -> Optional[str]:
+        """检测文本是否进入重复循环。
+
+        在滑动窗口中查找短模式的高频重复。当一个 10–60 字符的子串
+        在窗口中出现 8+ 次时，判定为重复循环。
+
+        Returns:
+            检测到的重复模式，或 None
+        """
+        if len(text) < min_pattern_len * min_repeats:
+            return None
+
+        upper = min(max_pattern_len, len(text) // min_repeats) + 1
+        for plen in range(min_pattern_len, upper):
+            pattern = text[-plen:]
+            if text.count(pattern) >= min_repeats:
+                return pattern
+
+        return None
+
     def normalize_tool_calls(
         self,
         raw_tool_calls: Any,
@@ -226,6 +256,9 @@ class ResponseHandler:
         # 状态：是否正在“排掉”从 thinking 泄漏到 answer 的 <details> 片段
         draining_details = False
         details_drain_buf = ""
+        # 重复循环检测状态
+        repeat_buffer = ""     # 最近输出的滑动窗口 (~500 字符)
+        repeat_chunk_count = 0  # 非空 chunk 计数
 
         def log_downstream(sse_data: str) -> None:
             nonlocal downstream_count
@@ -521,6 +554,44 @@ class ResponseHandler:
                         )
                         log_downstream(sse)
                         yield sse
+
+                # -- 重复循环检测 --
+                # 模型可能进入退化重复循环、无限输出相同内容直到 token 上限。
+                # 检测到后提前终止流，避免浪费 token。
+                if current_text and phase not in ("thinking", "done"):
+                    repeat_buffer = (repeat_buffer + current_text)[-500:]
+                    repeat_chunk_count += 1
+                    if (
+                        repeat_chunk_count >= 100
+                        and repeat_chunk_count % 30 == 0
+                    ):
+                        repeated_pattern = self._detect_repetition_loop(
+                            repeat_buffer
+                        )
+                        if repeated_pattern:
+                            self.logger.warning(
+                                f"⚠️ 检测到模型重复循环! "
+                                f"模式: {repeated_pattern[:30]!r}, "
+                                f"已处理 {line_count} 行/{repeat_chunk_count} chunks, "
+                                f"强制终止流"
+                            )
+                            role_output = await ensure_role_sent()
+                            if role_output:
+                                yield role_output
+                            error_msg = (
+                                "\n\n[ERROR: Model output repetition loop detected, "
+                                "stream terminated automatically. Please retry.]"
+                            )
+                            sse = format_sse_chunk(
+                                create_openai_chunk(
+                                    ensure_stream_id(),
+                                    model,
+                                    {"content": error_msg},
+                                )
+                            )
+                            log_downstream(sse)
+                            yield sse
+                            break
 
                 # -- 思维残留清理（所有非 thinking 阶段都生效）--
                 # 上游在 answer 阶段会重新发送 <details type="reasoning" done="true">...
