@@ -60,15 +60,15 @@
                             {% endif %}
                         </div>
                     </td>
-                    <td class="px-4 py-3 whitespace-nowrap text-sm font-medium tabular-nums text-slate-700">
-                        <span class="text-violet-700">输入 {{ log.input_tokens }}</span>
+                    <td class="px-4 py-3 whitespace-nowrap text-sm font-medium tabular-nums text-slate-700" title="输入: {{ log.input_tokens }} / 输出: {{ log.output_tokens }}">
+                        <span class="text-violet-700">输入 {{ log.input_tokens_display }}</span>
                         <span class="mx-2 text-slate-300">/</span>
-                        <span class="text-rose-700">输出 {{ log.output_tokens }}</span>
+                        <span class="text-rose-700">输出 {{ log.output_tokens_display }}</span>
                     </td>
-                    <td class="px-4 py-3 whitespace-nowrap text-sm font-medium tabular-nums text-slate-700">
-                        <span class="text-emerald-700">创建 {{ log.cache_creation_tokens }}</span>
+                    <td class="px-4 py-3 whitespace-nowrap text-sm font-medium tabular-nums text-slate-700" title="创建: {{ log.cache_creation_tokens }} / 命中: {{ log.cache_read_tokens }}">
+                        <span class="text-emerald-700">创建 {{ log.cache_creation_tokens_display }}</span>
                         <span class="mx-2 text-slate-300">/</span>
-                        <span class="text-amber-700">命中 {{ log.cache_read_tokens }}</span>
+                        <span class="text-amber-700">命中 {{ log.cache_read_tokens_display }}</span>
                     </td>
                     <td class="px-4 py-3 whitespace-nowrap text-sm font-medium tabular-nums text-slate-700">
                         <span>用时 {{ log.duration_display }}</span>

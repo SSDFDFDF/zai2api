@@ -10,6 +10,7 @@ import psutil
 
 from app.services.request_log_dao import RequestLogDAO, get_request_log_dao
 from app.services.token_dao import TokenDAO, get_token_dao
+from app.utils.format import format_compact_number
 from app.utils.token_pool import TokenPool, get_token_pool
 
 _TOKEN_POOL_SENTINEL = object()
@@ -36,16 +37,7 @@ def calculate_success_rate(
     return round(successful_requests / total_requests * 100, 1)
 
 
-def format_compact_number(value: Any) -> str:
-    """格式化大数字，便于仪表盘展示。"""
-    number = int(value or 0)
-    if number >= 1_000_000:
-        return f"{number / 1_000_000:.1f}M"
-    if number >= 10_000:
-        return f"{number / 10_000:.1f}万"
-    if number >= 1_000:
-        return f"{number / 1_000:.1f}k"
-    return str(number)
+
 
 
 def normalize_trend_window(value: Any) -> str:

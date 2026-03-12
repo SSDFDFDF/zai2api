@@ -379,8 +379,147 @@ def find_last_trigger_signal_outside_think(text: str, trigger_signal: str) -> in
 
 
 # ---------------------------------------------------------------------------
+# XML / JSON 通配修复 (Wildcard Repair Pipeline)
+# ---------------------------------------------------------------------------
+
+# 已知 XML 标签名 → (开标签正则, 闭标签正则, 规范开标签, 规范闭标签)
+_KNOWN_TAG_REPAIRS: List[tuple] = [
+    # function_calls  (兼容: functioncalls, function-calls, FUNCTION_CALLS 等)
+    (
+        re.compile(r'<\s*function[\s_-]*calls\s*>', re.IGNORECASE),
+        re.compile(r'</\s*function[\s_-]*calls\s*>', re.IGNORECASE),
+        '<function_calls>', '</function_calls>',
+    ),
+    # function_call  (单数, 兼容同上变体)
+    (
+        re.compile(r'<\s*function[\s_-]*call\s*>(?!\s*s)', re.IGNORECASE),
+        re.compile(r'</\s*function[\s_-]*call\s*>(?!\s*s)', re.IGNORECASE),
+        '<function_call>', '</function_call>',
+    ),
+    # tool
+    (
+        re.compile(r'<\s*tool\s*>', re.IGNORECASE),
+        re.compile(r'</\s*tool\s*>', re.IGNORECASE),
+        '<tool>', '</tool>',
+    ),
+    # args_json  (兼容: argsjson, args-json, args_Json 等)
+    (
+        re.compile(r'<\s*args[\s_-]*json\s*>', re.IGNORECASE),
+        re.compile(r'</\s*args[\s_-]*json\s*>', re.IGNORECASE),
+        '<args_json>', '</args_json>',
+    ),
+    # args  (仅在单独出现时)
+    (
+        re.compile(r'<\s*args\s*>', re.IGNORECASE),
+        re.compile(r'</\s*args\s*>', re.IGNORECASE),
+        '<args>', '</args>',
+    ),
+]
+
+# CDATA 开头泛化匹配:
+# 匹配 <! 后面跟若干可选空格/字母(包含CDATA)最终跟 [ 的情况
+# 能匹配: <![CDATA[, <![CDATACDATA[, <![ CDATA [, <![CDATA CDATA[, <![CData[
+_RE_CDATA_OPEN_FUZZY = re.compile(
+    r'<!\s*\[?\s*(?:CDATA\s*)+\[',
+    re.IGNORECASE,
+)
+
+# CDATA 终止符泛化匹配: ]] > 允许中间空格
+_RE_CDATA_CLOSE_FUZZY = re.compile(r'\]\s*\]\s*>')
+
+
+def normalize_cdata_markers(raw: str) -> str:
+    """修复畸形 CDATA 标记。
+
+    泛化匹配: 只要检测到包含 CDATA 和 [ 的开头标记,
+    就归一化为标准的 <![CDATA[ 和 ]]>。
+    """
+    if raw is None:
+        return ""
+
+    original = raw
+
+    # 修复开头标记
+    raw = _RE_CDATA_OPEN_FUZZY.sub('<![CDATA[', raw)
+
+    # 修复终止符 (仅当存在 CDATA 上下文时)
+    if '<![CDATA[' in raw:
+        raw = _RE_CDATA_CLOSE_FUZZY.sub(']]>', raw)
+
+    if raw != original:
+        logger.debug(f"🔧 CDATA 标记已修复: {repr(original[:60])} → {repr(raw[:60])}")
+
+    return raw
+
+
+def normalize_xml_tag_names(xml_str: str) -> str:
+    """归一化已知 XML 标签名 (大小写/空格/连字符变体)。"""
+    if not xml_str:
+        return ""
+
+    original = xml_str
+    for open_re, close_re, open_canon, close_canon in _KNOWN_TAG_REPAIRS:
+        xml_str = open_re.sub(open_canon, xml_str)
+        xml_str = close_re.sub(close_canon, xml_str)
+
+    if xml_str != original:
+        logger.debug("🔧 XML 标签名已归一化")
+
+    return xml_str
+
+
+def normalize_xml_structure(xml_str: str) -> str:
+    """组合 XML 结构修复: CDATA + 标签名归一化。"""
+    xml_str = normalize_cdata_markers(xml_str)
+    xml_str = normalize_xml_tag_names(xml_str)
+    return xml_str
+
+
+def repair_json_payload(s: str) -> str:
+    """修复常见 JSON 畸形: 尾随逗号、Python 布尔值/None。"""
+    if not s:
+        return s
+
+    original = s
+
+    # Python 布尔值/None → JSON (仅替换不在引号内的)
+    # 简单策略: 用词边界替换, 再验证结果是否仍可解析
+    s = re.sub(r'\bTrue\b', 'true', s)
+    s = re.sub(r'\bFalse\b', 'false', s)
+    s = re.sub(r'\bNone\b', 'null', s)
+
+    # 移除对象/数组最后一个元素后的尾随逗号
+    s = re.sub(r',\s*([}\]])', r'\1', s)
+
+    if s != original:
+        logger.debug(f"🔧 JSON payload 已修复: {repr(original[:60])} → {repr(s[:60])}")
+
+    return s
+
+
+def _is_xml_noise(s: str) -> bool:
+    """判断字符串是否全为可忽略的 XML 标记噪声 (CDATA 标记残留、空白等)。"""
+    if not s:
+        return True
+    stripped = s.strip()
+    if not stripped:
+        return True
+    # 允许由 CDATA 开闭标记碎片(含畸形)、空白、方括号等组成
+    return bool(re.fullmatch(
+        r'(?:'
+        r'<!\s*\[?\s*(?:CDATA\s*)*\[?'  # 畸形 CDATA 开头碎片
+        r'|\]\s*\]\s*>?'                 # CDATA 终止符碎片
+        r'|\s'                           # 空白
+        r')+',
+        stripped,
+        re.IGNORECASE | re.DOTALL,
+    ))
+
+
+# ---------------------------------------------------------------------------
 # XML 解析
 # ---------------------------------------------------------------------------
+
 
 def _parse_args_json_payload(payload: str) -> Optional[Dict[str, Any]]:
     """鲁棒的 args_json 解析（合并 PR #8 的改进）
@@ -406,6 +545,9 @@ def _parse_args_json_payload(payload: str) -> Optional[Dict[str, Any]]:
             return y if isinstance(y, dict) else None
         except Exception:
             return None
+
+    # ★ JSON 层修复: 尾随逗号、Python 布尔值
+    s = repair_json_payload(s)
 
     parsed = _try_parse(s)
     if parsed is not None:
@@ -435,9 +577,15 @@ def _parse_args_json_payload(payload: str) -> Optional[Dict[str, Any]]:
                     depth -= 1
                     if depth == 0:
                         candidate = s[start:i+1]
-                        if s[:start].strip() or s[i+1:].strip():
-                            logger.debug("🔧 args_json 恢复被拒绝: JSON 对象外有额外内容")
-                            break
+                        prefix = s[:start].strip()
+                        suffix = s[i+1:].strip()
+                        if prefix or suffix:
+                            # ★ 放宽: 如果外围内容是 XML 标记噪声则接受
+                            if _is_xml_noise(prefix) and _is_xml_noise(suffix):
+                                logger.debug("🔧 args_json 外围为 XML 噪声, 予以忽略")
+                            else:
+                                logger.debug("🔧 args_json 恢复被拒绝: JSON 对象外有额外内容")
+                                break
                         parsed = _try_parse(candidate)
                         if parsed is not None:
                             logger.debug("🔧 args_json 通过平衡对象提取恢复成功")
@@ -449,9 +597,13 @@ def _parse_args_json_payload(payload: str) -> Optional[Dict[str, Any]]:
 
 
 def _extract_cdata_text(raw: str) -> str:
-    """提取 CDATA 文本（合并 PR #8 的改进）"""
+    """提取 CDATA 文本（含畸形 CDATA 修复）"""
     if raw is None:
         return ""
+
+    # ★ 先修复畸形 CDATA 标记
+    raw = normalize_cdata_markers(raw)
+
     if "<![CDATA[" not in raw:
         return raw
 
@@ -492,6 +644,12 @@ def parse_function_calls_xml(
         return None
 
     cleaned_content = remove_think_blocks(xml_string)
+
+    # ★ 先对内容做 XML 通配修复 (标签名/CDATA), 让后续搜索能匹配到畸形标签
+    original_cleaned = cleaned_content
+    cleaned_content = normalize_xml_structure(cleaned_content)
+    if cleaned_content != original_cleaned:
+        logger.debug(f"🔧 XML 结构已修复 ({len(original_cleaned)} → {len(cleaned_content)} 字符)")
 
     # 查找所有触发信号位置
     signal_positions = []
@@ -831,6 +989,16 @@ class StreamingFunctionCallDetector:
         return (pos + self.signal_len <= len(self.content_buffer) and
                 not self.in_think_block)
 
+    def flush(self) -> str:
+        """流结束时刷出被 look-ahead 保留的剩余内容。
+
+        process_chunk 会保留最后 signal_len 个字符用于触发信号匹配，
+        当流正常结束时必须调用此方法将其释放。
+        """
+        remaining = self.content_buffer
+        self.content_buffer = ""
+        return remaining
+
     def finalize(self) -> Optional[List[Dict[str, Any]]]:
         """流结束时的最终处理"""
         if self.state == "tool_parsing":
@@ -846,9 +1014,15 @@ def looks_like_complete_function_calls(buf: str) -> bool:
     """检查缓冲区是否包含完整的 <function_calls> XML 结构。
 
     防止流式传输中因 HTTP 分块边界导致的 XML 片段被过早解析。
+    先对缓冲区做标签归一化, 以便畸形标签也能正确计数。
     """
     if not buf:
         return False
+
+    # ★ 对缓冲区做轻量归一化以匹配畸形标签
+    buf = normalize_xml_tag_names(buf)
+    buf = normalize_cdata_markers(buf)
+
     if "<function_calls>" not in buf or "</function_calls>" not in buf:
         return False
     if buf.count("<function_call>") != buf.count("</function_call>"):

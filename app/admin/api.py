@@ -30,6 +30,7 @@ from app.admin.config_manager import (
 )
 from app.admin.stats import collect_admin_stats, normalize_trend_window
 from app.services.request_log_dao import get_request_log_dao
+from app.utils.format import format_compact_number
 from app.utils.logger import logger
 
 router = APIRouter(prefix="/admin/api", tags=["admin-api"])
@@ -452,13 +453,17 @@ async def get_recent_logs(request: Request):
                     else "--"
                 ),
                 "input_tokens": int(row.get("input_tokens") or 0),
+                "input_tokens_display": format_compact_number(row.get("input_tokens")),
                 "output_tokens": int(row.get("output_tokens") or 0),
+                "output_tokens_display": format_compact_number(row.get("output_tokens")),
                 "cache_creation_tokens": int(
                     row.get("cache_creation_tokens") or 0
                 ),
+                "cache_creation_tokens_display": format_compact_number(row.get("cache_creation_tokens")),
                 "cache_read_tokens": int(
                     row.get("cache_read_tokens") or 0
                 ),
+                "cache_read_tokens_display": format_compact_number(row.get("cache_read_tokens")),
                 "error_message": str(row.get("error_message") or ""),
             }
         )

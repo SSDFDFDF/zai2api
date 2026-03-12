@@ -10,6 +10,7 @@ import time
 from typing import Any, AsyncGenerator, Dict, Optional, Tuple
 
 from app.services.request_log_dao import get_request_log_dao
+from app.utils.format import format_compact_number
 from app.utils.logger import get_logger
 from app.utils.request_source import RequestSourceInfo
 
@@ -214,6 +215,12 @@ async def write_request_log(
 ) -> None:
     """Persist a request log entry without breaking request handling."""
     duration = max(0.0, time.perf_counter() - started_at)
+    
+    status_icon = "✅" if success else "❌"
+    in_tokens = format_compact_number(input_tokens)
+    out_tokens = format_compact_number(output_tokens)
+    logger.info(f"{status_icon} [{provider}] {model} | In: {in_tokens} | Out: {out_tokens} | {duration:.2f}s")
+    
     try:
         dao = get_request_log_dao()
         await dao.add_log(

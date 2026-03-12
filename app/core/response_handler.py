@@ -220,11 +220,17 @@ class ResponseHandler:
         has_sent_role = False
         finished = False
         line_count = 0
+        downstream_count = 0
         last_phase = None
         stream_id: Optional[str] = None  # PR #8: 统一 stream ID
         # 状态：是否正在“排掉”从 thinking 泄漏到 answer 的 <details> 片段
         draining_details = False
         details_drain_buf = ""
+
+        def log_downstream(sse_data: str) -> None:
+            nonlocal downstream_count
+            downstream_count += 1
+            self.logger.debug(f"\U0001f4e4 Client SSE #{downstream_count}: {sse_data.rstrip()[:200]}")
 
         # Toolify 流式检测器
         detector: Optional[StreamingFunctionCallDetector] = None
@@ -244,11 +250,13 @@ class ResponseHandler:
             if has_sent_role:
                 return None
             has_sent_role = True
-            return format_sse_chunk(
+            chunk = format_sse_chunk(
                 create_openai_chunk(
                     ensure_stream_id(), model, {"role": "assistant"}
                 )
             )
+            log_downstream(chunk)
+            return chunk
 
         def build_tool_calls_chunks(
             parsed_tools: List[Dict[str, Any]],
@@ -332,12 +340,32 @@ class ResponseHandler:
                 if role_output:
                     yield role_output
 
+            # 刷出 detector 的 look-ahead 缓冲区中被保留的内容
+            if detector and detector.state != "tool_parsing" and not tool_calls_accum:
+                remaining = detector.flush()
+                if remaining:
+                    self.logger.debug(
+                        f"🧹 刷出 detector 残留缓冲: {len(remaining)} 字符: {remaining[:80]}"
+                    )
+                    sse = format_sse_chunk(
+                        create_openai_chunk(
+                            ensure_stream_id(),
+                            model,
+                            {"content": remaining},
+                        )
+                    )
+                    log_downstream(sse)
+                    yield sse
+
             finish_reason = "tool_calls" if tool_calls_accum else "stop"
             finish_chunk = create_openai_chunk(
                 ensure_stream_id(), model, {}, finish_reason
             )
             finish_chunk["usage"] = usage_info
-            yield format_sse_chunk(finish_chunk)
+            finish_sse = format_sse_chunk(finish_chunk)
+            log_downstream(finish_sse)
+            yield finish_sse
+            log_downstream("data: [DONE]")
             yield "data: [DONE]\n\n"
             finished = True
 
@@ -348,8 +376,7 @@ class ResponseHandler:
                     continue
 
                 # 调试：捕获原始 SSE 行
-                if line_count <= 3:
-                    self.logger.debug(f"🔍 SSE line #{line_count}: {line[:200]}")
+                self.logger.debug(f"🔍 SSE line #{line_count}: {line[:200]}")
 
                 current_line = line.strip()
                 if not current_line.startswith("data:"):
@@ -445,21 +472,21 @@ class ResponseHandler:
                         yield role_output
                     tool_calls_accum.extend(direct_tool_calls)
                     for tool_call in direct_tool_calls:
-                        yield format_sse_chunk(
+                        sse = format_sse_chunk(
                             create_openai_chunk(
                                 ensure_stream_id(),
                                 model,
                                 {"tool_calls": [tool_call]},
                             )
                         )
+                        log_downstream(sse)
+                        yield sse
 
-                # Toolify 流式工具检测
-                # 注意：thinking 阶段不经过 detector，因为 detector 的缓冲会切断
-                # <details> 标签导致 clean_reasoning_delta 无法正确清理
-                if detector and current_text and detector.state != "tool_parsing" and phase != "thinking":
-                    # -- 排掉从 thinking 泄漏到 answer 的 <details> 残留 --
-                    # 上游会在 answer 阶段重新发送 <details type="reasoning" done="true">...
-                    # 并且 thinking 阶段未关闭的 <details> 标签尾巴也会泄漏进来
+                # -- 思维残留清理（所有非 thinking 阶段都生效）--
+                # 上游在 answer 阶段会重新发送 <details type="reasoning" done="true">...
+                # 以及 thinking 阶段未关闭的 <details> 标签尾巴也会泄漏进来
+                # 此清理必须在 detector 和普通路径之前执行
+                if phase != "thinking" and current_text and not (detector and detector.state == "tool_parsing"):
                     if draining_details:
                         details_drain_buf += current_text
                         # 等待任意思维标签的关闭
@@ -478,16 +505,16 @@ class ResponseHandler:
                         else:
                             continue
                     else:
-                        # 只要不在 thinking 阶段且没在 draining，就随时防范思维标签泄漏
+                        # 防范思维标签泄漏到非 thinking 阶段
                         cleaned, is_unclosed = self.strip_thinking_residue(current_text)
-                        
+
                         if is_unclosed:
                             draining_details = True
                             details_drain_buf = current_text
                             self.logger.debug(
                                 f"🧹 检测到未闭合思维标签残留, 开始排掉: {current_text[:80]}..."
                             )
-                            
+
                         if not cleaned:
                             continue
                         elif cleaned != current_text:
@@ -496,6 +523,10 @@ class ResponseHandler:
                             )
                             current_text = cleaned
 
+                # Toolify 流式工具检测
+                # 注意：thinking 阶段不经过 detector，因为 detector 的缓冲会切断
+                # <details> 标签导致 clean_reasoning_delta 无法正确清理
+                if detector and current_text and detector.state != "tool_parsing" and phase != "thinking":
                     is_detected, content_to_yield = detector.process_chunk(
                         current_text
                     )
@@ -509,13 +540,15 @@ class ResponseHandler:
                             role_output = await ensure_role_sent()
                             if role_output:
                                 yield role_output
-                            yield format_sse_chunk(
+                            sse = format_sse_chunk(
                                 create_openai_chunk(
                                     ensure_stream_id(),
                                     model,
                                     {"content": content_to_yield},
                                 )
                             )
+                            log_downstream(sse)
+                            yield sse
                         continue  # 进入工具解析模式，不再输出内容
 
                     # 未触发，正常输出内容
@@ -523,13 +556,15 @@ class ResponseHandler:
                         role_output = await ensure_role_sent()
                         if role_output:
                             yield role_output
-                        yield format_sse_chunk(
+                        sse = format_sse_chunk(
                             create_openai_chunk(
                                 ensure_stream_id(),
                                 model,
                                 {"content": content_to_yield},
                             )
                         )
+                        log_downstream(sse)
+                        yield sse
                     continue
 
                 # 工具解析模式: 累积内容并尝试早期终止
@@ -600,43 +635,29 @@ class ResponseHandler:
                         role_output = await ensure_role_sent()
                         if role_output:
                             yield role_output
-                        yield format_sse_chunk(
+                        sse = format_sse_chunk(
                             create_openai_chunk(
                                 ensure_stream_id(),
                                 model,
                                 {"reasoning_content": cleaned},
                             )
                         )
+                        log_downstream(sse)
+                        yield sse
 
-                elif phase == "answer":
-                    text = delta_content or self.extract_answer_content(
-                        edit_content
+                elif phase in ("answer", "other") and current_text:
+                    role_output = await ensure_role_sent()
+                    if role_output:
+                        yield role_output
+                    sse = format_sse_chunk(
+                        create_openai_chunk(
+                            ensure_stream_id(),
+                            model,
+                            {"content": current_text},
+                        )
                     )
-                    if text:
-                        role_output = await ensure_role_sent()
-                        if role_output:
-                            yield role_output
-                        yield format_sse_chunk(
-                            create_openai_chunk(
-                                ensure_stream_id(),
-                                model,
-                                {"content": text},
-                            )
-                        )
-
-                elif phase == "other":
-                    other_text = self.extract_answer_content(edit_content)
-                    if other_text:
-                        role_output = await ensure_role_sent()
-                        if role_output:
-                            yield role_output
-                        yield format_sse_chunk(
-                            create_openai_chunk(
-                                ensure_stream_id(),
-                                model,
-                                {"content": other_text},
-                            )
-                        )
+                    log_downstream(sse)
+                    yield sse
 
                 elif phase == "search" or chunk_type == "web_search":
                     citation_text = self.format_search_results(data)
@@ -644,13 +665,15 @@ class ResponseHandler:
                         role_output = await ensure_role_sent()
                         if role_output:
                             yield role_output
-                        yield format_sse_chunk(
+                        sse = format_sse_chunk(
                             create_openai_chunk(
                                 ensure_stream_id(),
                                 model,
                                 {"content": citation_text},
                             )
                         )
+                        log_downstream(sse)
+                        yield sse
 
                 if data.get("done"):
                     break
