@@ -111,8 +111,13 @@
                 {% for section in sections %}
                 <button type="button" @click="activeTab = '{{ section.id }}'"
                     :class="activeTab === '{{ section.id }}' ? 'bg-indigo-600 text-white shadow-md' : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200'"
-                    class="px-4 py-2 rounded-full text-sm font-semibold whitespace-nowrap transition-colors">
-                    {{ section.title }}
+                    class="group px-4 py-2 rounded-full text-sm font-semibold whitespace-nowrap transition-all duration-200 flex items-center gap-2">
+                    {% if section.icon %}
+                    <svg class="h-4 w-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="{{ section.icon }}" />
+                    </svg>
+                    {% endif %}
+                    <span>{{ section.title }}</span>
                 </button>
                 {% endfor %}
             </div>
@@ -124,9 +129,18 @@
             <div x-show="activeTab === '{{ section.id }}'" x-transition:enter="transition-opacity ease-out duration-300"
                 x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
                 class="bg-white rounded-3xl p-6 md:p-8 shadow-sm border border-gray-100">
-                <div class="mb-6 space-y-1">
-                    <h2 class="text-xl font-bold text-gray-900">{{ section.title }}</h2>
-                    <p class="text-sm text-gray-500">{{ section.description }}</p>
+                <div class="mb-8 flex items-start gap-4">
+                    {% if section.icon %}
+                    <div class="p-4 bg-indigo-50 text-indigo-600 rounded-2xl group-hover:bg-indigo-100 transition-colors duration-300 shadow-sm shadow-indigo-100">
+                        <svg class="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="{{ section.icon }}" />
+                        </svg>
+                    </div>
+                    {% endif %}
+                    <div class="space-y-1 py-1">
+                        <h2 class="text-2xl font-extrabold text-gray-900 tracking-tight">{{ section.title }}</h2>
+                        <p class="text-sm text-gray-500 leading-relaxed">{{ section.description }}</p>
+                    </div>
                 </div>
                 <!-- Fields Grid -->
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2">

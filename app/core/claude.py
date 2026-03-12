@@ -139,8 +139,7 @@ def _build_openai_request(body: Dict[str, Any]) -> OpenAIRequest:
     resolved_model = _resolve_claude_model(body.get("model", settings.GLM5_MODEL))
     if resolved_model != body.get("model", settings.GLM5_MODEL):
         logger.info(
-            f"🔀 Claude 模型映射: "
-            f"{body.get('model', settings.GLM5_MODEL)} -> {resolved_model}"
+            f"[Claude] model mapped: {body.get('model', settings.GLM5_MODEL)} -> {resolved_model}"
         )
 
     return OpenAIRequest(
@@ -489,7 +488,7 @@ async def claude_messages(
             "invalid_request_error",
         )
     logger.info(
-        f"{source_prefix} 收到 Claude 请求 - 模型: {body.get('model')}, 映射模型: {openai_request.model}, 流式: {openai_request.stream}, 消息数: {len(openai_request.messages)}, 工具数: {len(openai_request.tools) if openai_request.tools else 0}"
+        f"{source_prefix} Claude req - model: {body.get('model')}, map_model: {openai_request.model}, stream: {openai_request.stream}, msg_cnt: {len(openai_request.messages)}, tool_cnt: {len(openai_request.tools) if openai_request.tools else 0}"
     )
     logger.debug(f"{source_prefix} 客户端请求原样数据: {body}")
 
@@ -498,7 +497,7 @@ async def claude_messages(
 
     try:
         client = get_upstream_client()
-        result = await client.chat_completion(openai_request)
+        result = await client.chat_completion(openai_request, http_request=request)
     except Exception as exc:
         logger.error(f"{source_prefix} ❌ Claude 请求处理失败: {exc}")
         await write_request_log(

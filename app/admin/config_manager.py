@@ -44,6 +44,7 @@ class ConfigSectionSpec:
     title: str
     description: str
     fields: tuple[ConfigFieldSpec, ...]
+    icon: str = ""
 
 
 CONFIG_SECTIONS: tuple[ConfigSectionSpec, ...] = (
@@ -51,6 +52,7 @@ CONFIG_SECTIONS: tuple[ConfigSectionSpec, ...] = (
         id="access",
         title="接入与认证",
         description="控制上游接口地址、客户端鉴权和 Function Call 行为。",
+        icon="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z",
         fields=(
             ConfigFieldSpec(
                 key="API_ENDPOINT",
@@ -97,6 +99,13 @@ CONFIG_SECTIONS: tuple[ConfigSectionSpec, ...] = (
                 input_type="number",
                 min_value=1,
                 placeholder="200000",
+            ),
+            ConfigFieldSpec(
+                key="UPSTREAM_BACKGROUND_TASKS",
+                label="上游背景任务",
+                description="是否允许上游执行标题生成、搜索总结等背景任务（开启可能消耗更多额度/时间）。",
+                value_type="bool",
+                default_value=False,
             ),
         ),
     ),
@@ -171,12 +180,23 @@ CONFIG_SECTIONS: tuple[ConfigSectionSpec, ...] = (
                 restart_required=True,
                 db_persist=False,
             ),
+            ConfigFieldSpec(
+                key="MAX_UPLOAD_FILE_SIZE",
+                label="文件上传限制 (Bytes)",
+                description="允许上传到上游的最大文件大小（默认 10MB）。",
+                value_type="int",
+                default_value=10485760,
+                input_type="number",
+                min_value=0,
+                placeholder="10485760",
+            ),
         ),
     ),
     ConfigSectionSpec(
         id="tokens",
         title="Token 池策略",
         description="失败判定、恢复时间和自动导入、自动维护计划任务。",
+        icon="M4 7v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2H6c-1.1 0-2 .9-2 2zm0 4h16m-16 4h16",
         fields=(
             ConfigFieldSpec(
                 key="TOKEN_FAILURE_THRESHOLD",
@@ -270,6 +290,7 @@ CONFIG_SECTIONS: tuple[ConfigSectionSpec, ...] = (
         id="guest",
         title="匿名 Guest 会话池",
         description="没有用户 Token 时，控制匿名会话池的容量和维护策略。",
+        icon="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z",
         fields=(
             ConfigFieldSpec(
                 key="ANONYMOUS_MODE",
@@ -351,6 +372,7 @@ CONFIG_SECTIONS: tuple[ConfigSectionSpec, ...] = (
         id="models",
         title="模型映射",
         description="映射 OpenAI 兼容模型名到上游 Z.AI 实际模型名。",
+        icon="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4",
         fields=(
             ConfigFieldSpec(
                 key="GLM45_MODEL",
@@ -476,6 +498,7 @@ CONFIG_SECTIONS: tuple[ConfigSectionSpec, ...] = (
         id="proxy",
         title="网络代理",
         description="用于所有上游访问的全局网络代理配置。",
+        icon="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9",
         fields=(
             ConfigFieldSpec(
                 key="HTTP_PROXY",
@@ -492,6 +515,7 @@ CONFIG_SECTIONS: tuple[ConfigSectionSpec, ...] = (
         id="timeouts",
         title="超时控制",
         description="系统各环节的超时时间（单位：秒）。支持小数，修改即时生效。",
+        icon="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z",
         fields=(
             ConfigFieldSpec(
                 key="HTTP_CONNECT_TIMEOUT",
@@ -589,6 +613,7 @@ CONFIG_SECTIONS: tuple[ConfigSectionSpec, ...] = (
         id="admin",
         title="后台安全",
         description="管理后台密码和会话密钥。修改后建议重新登录。",
+        icon="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z",
         fields=(
             ConfigFieldSpec(
                 key="ADMIN_PASSWORD",
@@ -612,6 +637,42 @@ CONFIG_SECTIONS: tuple[ConfigSectionSpec, ...] = (
                 required=True,
                 sensitive=True,
                 wide=True,
+            ),
+        ),
+    ),
+    ConfigSectionSpec(
+        id="personalization",
+        title="上游个性化",
+        description="配置发送给上游的用户画像变量，用于自定义模型回复风格。",
+        icon="M5.121 17.804A13.937 13.937 0 0112 16c2.5 0 4.847.655 6.879 1.804M15 10a3 3 0 11-6 0 3 3 0 016 0zm6 2a9 9 0 11-18 0 9 9 0 0118 0z",
+        fields=(
+            ConfigFieldSpec(
+                key="UPSTREAM_USER_NAME",
+                label="用户名称",
+                description="上游上下文中的 {{USER_NAME}} 变量。",
+                value_type="str",
+                default_value="Guest",
+            ),
+            ConfigFieldSpec(
+                key="UPSTREAM_USER_LOCATION",
+                label="用户位置",
+                description="上游上下文中的 {{USER_LOCATION}} 变量。",
+                value_type="str",
+                default_value="Unknown",
+            ),
+            ConfigFieldSpec(
+                key="UPSTREAM_USER_TIMEZONE",
+                label="用户时区",
+                description="上游上下文中的 {{CURRENT_TIMEZONE}} 变量。",
+                value_type="str",
+                default_value="Asia/Shanghai",
+            ),
+            ConfigFieldSpec(
+                key="UPSTREAM_USER_LANGUAGE",
+                label="用户语言",
+                description="上游上下文中的 {{USER_LANGUAGE}} 变量。",
+                value_type="str",
+                default_value="zh-CN",
             ),
         ),
     ),
@@ -790,6 +851,7 @@ def build_config_page_data(
                 "id": section.id,
                 "title": section.title,
                 "description": section.description,
+                "icon": section.icon,
                 "fields": rendered_fields,
                 "field_count": len(rendered_fields),
             }

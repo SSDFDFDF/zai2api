@@ -212,18 +212,18 @@ def build_upstream_body(
             "enable_thinking": enable_thinking,
         },
         "background_tasks": {
-            "title_generation": True,
-            "tags_generation": True,
+            "title_generation": settings.UPSTREAM_BACKGROUND_TASKS,
+            "tags_generation": settings.UPSTREAM_BACKGROUND_TASKS,
         },
         "variables": {
-            "{{USER_NAME}}": "Guest",
-            "{{USER_LOCATION}}": "Unknown",
+            "{{USER_NAME}}": settings.UPSTREAM_USER_NAME,
+            "{{USER_LOCATION}}": settings.UPSTREAM_USER_LOCATION,
             "{{CURRENT_DATETIME}}": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "{{CURRENT_DATE}}": datetime.now().strftime("%Y-%m-%d"),
             "{{CURRENT_TIME}}": datetime.now().strftime("%H:%M:%S"),
             "{{CURRENT_WEEKDAY}}": datetime.now().strftime("%A"),
-            "{{CURRENT_TIMEZONE}}": "Asia/Shanghai",
-            "{{USER_LANGUAGE}}": "zh-CN",
+            "{{CURRENT_TIMEZONE}}": settings.UPSTREAM_USER_TIMEZONE,
+            "{{USER_LANGUAGE}}": settings.UPSTREAM_USER_LANGUAGE,
         },
         "chat_id": chat_id,
         "id": message_id,
@@ -258,6 +258,7 @@ async def sign_request(
     last_user_text: str,
     chat_id: str,
     token: str,
+    fe_version: Optional[str] = None,
 ) -> tuple[str, Dict[str, str], str]:
     """生成双层 HMAC 签名并构造带签名的 URL 和请求头。
 
@@ -267,6 +268,7 @@ async def sign_request(
         last_user_text: 最后一条用户消息文本，用于签名载荷。
         chat_id: 对话 ID，用于构建 Referer 和 URL 路径。
         token: 认证令牌，添加到请求头 Authorization。
+        fe_version: 可选前端版本号，传入时跳过网络拉取（用于并行预取）。
 
     Returns:
         ``(signed_url, headers, fe_version)`` 三元组：
@@ -276,7 +278,8 @@ async def sign_request(
     """
     timestamp_ms = int(time.time() * 1000)
     request_id = str(uuid.uuid4())
-    fe_version = await get_latest_fe_version()
+    if fe_version is None:
+        fe_version = await get_latest_fe_version()
 
     try:
         signing_metadata = f"requestId,{request_id},timestamp,{timestamp_ms},user_id,{user_id}"

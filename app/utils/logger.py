@@ -27,14 +27,14 @@ def setup_logger(log_dir, log_retention_days=7, log_rotation="1 day", debug_mode
     log_level = "DEBUG" if debug_mode else "INFO"
 
     console_format = (
-        "<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <level>{message}</level>"
+        "{time:HH:mm:ss} | {level: <8} | {message}"
         if not debug_mode
-        else "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | "
-        "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> | <level>{message}</level>"
+        else "{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | "
+        "{name}:{function}:{line} | {message}"
     )
 
     # 添加控制台输出（根据 debug_mode 设置级别）
-    logger.add(sys.stderr, level=log_level, format=console_format, colorize=True)
+    logger.add(sys.stderr, level=log_level, format=console_format, colorize=False)
 
     # 添加文件输出
     try:
@@ -57,7 +57,7 @@ def setup_logger(log_dir, log_retention_days=7, log_rotation="1 day", debug_mode
         )
     except (PermissionError, OSError) as e:
         # 如果无法创建日志目录或文件，降级为仅控制台输出
-        logger.warning(f"⚠️ 无法创建日志文件 ({e})，将仅使用控制台输出")
+        logger.warning(f"无法创建日志文件 ({e})，将仅使用控制台输出")
 
     app_logger = logger
 
@@ -70,7 +70,7 @@ def get_logger():
     if app_logger is None:
         # 如果没有设置过logger，使用默认配置
         logger.remove()  # 移除所有现有处理器
-        logger.add(sys.stderr, level="INFO", format="<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> | <level>{message}</level>")
+        logger.add(sys.stderr, level="INFO", format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} | {message}", colorize=False)
         app_logger = logger
     return app_logger
 

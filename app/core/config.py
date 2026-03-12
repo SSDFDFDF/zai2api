@@ -88,6 +88,22 @@ class Settings(BaseSettings):
     TOOL_SUPPORT: bool = os.getenv("TOOL_SUPPORT", "true").lower() == "true"
     SCAN_LIMIT: int = int(os.getenv("SCAN_LIMIT", "200000"))
 
+    # File Upload
+    # 上传文件大小限制（字节），默认 10MB，0 表示不限制
+    MAX_UPLOAD_FILE_SIZE: int = int(os.getenv("MAX_UPLOAD_FILE_SIZE", str(10 * 1024 * 1024)))
+
+    # Upstream User Variables
+    UPSTREAM_USER_NAME: str = os.getenv("UPSTREAM_USER_NAME", "Guest")
+    UPSTREAM_USER_LOCATION: str = os.getenv("UPSTREAM_USER_LOCATION", "Unknown")
+    UPSTREAM_USER_TIMEZONE: str = os.getenv("UPSTREAM_USER_TIMEZONE", "Asia/Shanghai")
+    UPSTREAM_USER_LANGUAGE: str = os.getenv("UPSTREAM_USER_LANGUAGE", "zh-CN")
+
+    # Upstream Background Tasks (title/tag generation)
+    # 代理场景下每次请求都是新 chat_id, 无需上游生成标题/标签
+    UPSTREAM_BACKGROUND_TASKS: bool = (
+        os.getenv("UPSTREAM_BACKGROUND_TASKS", "false").lower() == "true"
+    )
+
     # Session / Continuous Conversation Configuration
     SESSION_ENABLED: bool = os.getenv("SESSION_ENABLED", "true").lower() == "true"
     SESSION_TTL: int = int(os.getenv("SESSION_TTL", "3600"))           # 会话 TTL（秒）

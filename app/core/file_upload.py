@@ -17,6 +17,7 @@ from urllib.parse import quote
 import httpx
 
 from app.utils.logger import get_logger
+from app.core.config import settings
 
 logger = get_logger()
 
@@ -52,6 +53,18 @@ async def upload_file(
     try:
         # 解析 data URL
         header, encoded = data_url.split(",", 1)
+
+        # 解码前先预估文件大小，避免大文件 OOM
+        if settings.MAX_UPLOAD_FILE_SIZE > 0:
+            # base64 编码后大小约为原始大小的 4/3，反推原始大小估算
+            estimated_size = len(encoded) * 3 // 4
+            if estimated_size > settings.MAX_UPLOAD_FILE_SIZE:
+                limit_kb = settings.MAX_UPLOAD_FILE_SIZE // 1024
+                logger.warning(
+                    f"⚠️ 文件过大，预估 {estimated_size // 1024}KB 超过限制 {limit_kb}KB，已跳过上传"
+                )
+                return None
+
         mime_type = (
             header.split(";")[0].split(":")[1]
             if ":" in header
@@ -114,7 +127,7 @@ async def upload_file(
         file_name = result.get("filename", filename)
         file_meta = result.get("meta", {})
 
-        logger.info(f"✅ 文件上传成功: {file_id} ({file_name})")
+        logger.info(f"[file] upload success: {file_id} ({file_name})")
 
         # 使用上游返回的完整 meta（包含 oss_endpoint, cdn_url 等）
         return {

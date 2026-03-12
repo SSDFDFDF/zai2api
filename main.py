@@ -164,10 +164,9 @@ async def root():
 def run_server():
     service_name = settings.SERVICE_NAME
 
-    logger.info(f"🚀 启动 {service_name} 服务...")
-    logger.info(f"📡 监听地址: 0.0.0.0:{settings.LISTEN_PORT}")
-    logger.info(f"🔧 调试模式: {'开启' if settings.DEBUG_LOGGING else '关闭'}")
-    logger.info(f"🔐 匿名模式: {'开启' if settings.ANONYMOUS_MODE else '关闭'}")
+    logger.info(f"🚀 starting {service_name} service...")
+    logger.info(f"📡 listen address: 0.0.0.0:{settings.LISTEN_PORT}")
+    logger.info(f"🔧 mode: debug {'enabled' if settings.DEBUG_LOGGING else 'disabled'}, anonymous {'enabled' if settings.ANONYMOUS_MODE else 'disabled'}")
 
     try:
         Granian(
@@ -181,9 +180,9 @@ def run_server():
             **RELOAD_CONFIG,    # 热重载配置
         ).serve()
     except KeyboardInterrupt:
-        logger.info("🛑 收到中断信号，正在关闭服务...")
+        logger.info("🛑 received interrupt signal, shutting down...")
     except Exception as e:
-        logger.error(f"❌ 服务启动失败: {e}")
+        logger.error(f"❌ service startup failed: {e}")
         sys.exit(1)
 
 

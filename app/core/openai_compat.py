@@ -126,6 +126,25 @@ def format_sse_done() -> str:
     return "data: [DONE]\n\n"
 
 
+def get_error_message(error: Exception) -> str:
+    """从异常中提取更友好的错误消息。"""
+    error_str = str(error)
+    
+    # 特殊处理 SSL 错误
+    if "SSL" in error_str or "ssl" in error_str:
+        return f"SSL/TLS 连接握手失败，请检查证书或网络环境: {error_str}"
+    
+    # 特殊处理代理错误
+    if "proxy" in error_str.lower() or "Proxy" in error_str:
+        return f"代理连接失败，请检查代理设置或服务器联通性: {error_str}"
+    
+    # 处理超时
+    if "timeout" in error_str.lower():
+        return f"连接上游响应超时: {error_str}"
+        
+    return error_str
+
+
 def handle_error(error: Exception, context: str = "") -> Dict[str, Any]:
     """统一错误处理。"""
     # 未知模型 → model_not_found（路由层据此返回 404）
@@ -139,8 +158,10 @@ def handle_error(error: Exception, context: str = "") -> Dict[str, Any]:
             }
         }
 
-    error_msg = f"上游{context}错误: {str(error)}" if context else f"上游错误: {str(error)}"
-    logger.error(error_msg)
+    friendly_msg = get_error_message(error)
+    error_msg = f"上游{context}错误: {friendly_msg}" if context else f"上游错误: {friendly_msg}"
+    logger.error(f"{error_msg} (raw: {error})")
+    
     return {
         "error": {
             "message": error_msg,

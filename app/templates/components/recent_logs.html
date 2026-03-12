@@ -7,7 +7,7 @@
 <div class="space-y-4">
     <div class="max-h-[30rem] overflow-auto rounded-2xl border border-slate-200">
         {% if logs %}
-        <table class="min-w-[1240px] divide-y divide-slate-200">
+        <table class="w-full min-w-[1240px] divide-y divide-slate-200">
             <thead class="bg-slate-50/95 backdrop-blur">
                 <tr>
                     <th class="sticky top-0 bg-slate-50/95 px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-slate-500">时间</th>
@@ -26,7 +26,7 @@
                         {{ log.timestamp }}
                     </td>
                     <td class="px-4 py-3 text-sm text-slate-600">
-                        <div class="flex max-w-[28rem] items-center gap-2 overflow-hidden whitespace-nowrap">
+                        <div class="flex max-w-2xl items-center gap-2 overflow-hidden whitespace-nowrap">
                             <span class="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">
                                 {{ log.model }}
                             </span>
@@ -35,13 +35,13 @@
                             </span>
                         </div>
                         {% if log.error_message %}
-                        <p class="mt-1 max-w-[28rem] truncate text-xs text-red-500">
+                        <p class="mt-1 max-w-2xl truncate text-xs text-red-500">
                             {{ log.error_message }}
                         </p>
                         {% endif %}
                     </td>
                     <td class="px-4 py-3 text-sm text-slate-600">
-                        <div class="flex max-w-[20rem] items-center gap-2 overflow-hidden whitespace-nowrap">
+                        <div class="flex max-w-sm items-center gap-2 overflow-hidden whitespace-nowrap">
                             <span class="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">
                                 {{ log.client_name }}
                             </span>

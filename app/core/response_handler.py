@@ -150,6 +150,7 @@ class ResponseHandler:
         upper = min(max_pattern_len, len(text) // min_repeats) + 1
         for plen in range(min_pattern_len, upper):
             pattern = text[-plen:]
+            # str.count() 是 C 层实现，比手动循环快
             if text.count(pattern) >= min_repeats:
                 return pattern
 
@@ -230,9 +231,9 @@ class ResponseHandler:
         start_time = getattr(request, "started_at", None)
         if start_time:
             ttfb = time.perf_counter() - start_time
-            self.logger.info(f"upstream success, start handle SSE stream, ttfb: {ttfb:.3f}s")
+            self.logger.info(f"[stream] upstream success, start handle SSE stream, ttfb: {ttfb:.3f}s")
         else:
-            self.logger.info("upstream success, start handle SSE stream")
+            self.logger.info("[stream] upstream success, start handle SSE stream")
 
         sse_start_time = time.perf_counter()
 
@@ -499,10 +500,10 @@ class ResponseHandler:
 
                 if data.get("usage"):
                     usage_info = data["usage"]
-                    self.logger.debug(f"🔍 [usage] 解析到 data.usage: {usage_info}")
+                    self.logger.info(f"[usage] catch data.usage: {usage_info}")
                 elif chunk.get("usage"):
                     usage_info = chunk["usage"]
-                    self.logger.debug(f"🔍 [usage] 解析到 chunk.usage: {usage_info}")
+                    self.logger.info(f"[usage] catch chunk.usage: {usage_info}")
 
                 # 累积内容
                 # edit_index: 上游指定在 buffered_content 中的插入位置
@@ -710,7 +711,7 @@ class ResponseHandler:
                                 )
                             else:
                                 self.logger.info(
-                                    f"stream success detect: {len(parsed)} tools"
+                                    f"[tools] success detect: {len(parsed)} tools"
                                 )
                                 tc_chunks = build_tool_calls_chunks(parsed)
                                 role_output = await ensure_role_sent()
@@ -808,11 +809,11 @@ class ResponseHandler:
             total_elapsed = time.perf_counter() - start_time if start_time else None
             if total_elapsed is not None:
                 self.logger.info(
-                    f"SSE done {line_count} lines, SSE time: {elapsed:.3f}s, total time: {total_elapsed:.3f}s"
+                    f"[stream] SSE done {line_count} lines, SSE time: {elapsed:.3f}s, total time: {total_elapsed:.3f}s"
                 )
             else:
                 self.logger.info(
-                    f"SSE done {line_count} lines, SSE time: {elapsed:.3f}s"
+                    f"[stream] SSE done {line_count} lines, SSE time: {elapsed:.3f}s"
                 )
 
     # ------------------------------------------------------------------
@@ -950,7 +951,7 @@ class ResponseHandler:
                         if trigger_pos >= 0:
                             final_content = final_content[:trigger_pos].strip()
                         self.logger.info(
-                            f"nostream XML parse success: {len(normalized)} tools"
+                            f"[tools] XML parse success: {len(normalized)} tools"
                         )
                 else:
                     self.logger.warning(

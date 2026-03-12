@@ -48,7 +48,7 @@ def get_upstream_client_if_ready() -> Optional[UpstreamClient]:
 
 async def handle_non_stream_response(stream_response, request: OpenAIRequest) -> JSONResponse:
     """处理非流式响应。"""
-    logger.info("📄 开始处理非流式响应")
+    logger.info("[stream] start handle non stream response")
 
     full_content = []
     reasoning_content = []
@@ -125,7 +125,7 @@ async def handle_non_stream_response(stream_response, request: OpenAIRequest) ->
         ),
     )
 
-    logger.info("✅ 非流式响应处理完成")
+    logger.info("[stream] end handle non stream response")
     return JSONResponse(content=response_data.model_dump(exclude_none=True))
 
 
@@ -185,7 +185,7 @@ async def chat_completions(
                 raise HTTPException(status_code=401, detail="Invalid API key")
 
         client = get_upstream_client()
-        result = await client.chat_completion(body)
+        result = await client.chat_completion(body, http_request=http_request)
 
         if isinstance(result, dict) and "error" in result:
             error_info = result["error"]

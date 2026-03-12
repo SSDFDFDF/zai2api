@@ -216,7 +216,7 @@ async def write_request_log(
     """Persist a request log entry without breaking request handling."""
     duration = max(0.0, time.perf_counter() - started_at)
     
-    status_icon = "✅" if success else "❌"
+    status_icon = "✓" if success else "✗"
     in_tokens = format_compact_number(input_tokens)
     out_tokens = format_compact_number(output_tokens)
     logger.info(f"{status_icon} [{provider}] {model} | In: {in_tokens} | Out: {out_tokens} | {duration:.2f}s")
