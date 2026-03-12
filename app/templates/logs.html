@@ -10,9 +10,8 @@
             <p class="mt-1 text-sm text-gray-600">滚动查看服务当前输出的最新日志</p>
         </div>
         <div class="flex items-center space-x-3">
-            <button
-                onclick="window.location.reload()"
-                class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors">
+            <button onclick="window.location.reload()"
+                class="px-4 py-2 bg-slate-800 text-white rounded-lg hover:bg-indigo-700 transition-colors">
                 刷新页面
             </button>
         </div>
@@ -30,12 +29,9 @@
             </div>
         </div>
         <div class="p-6">
-            <div
-                id="live-logs"
-                hx-get="/admin/api/live-logs"
-                hx-trigger="load, every 3s"
+            <div id="live-logs" hx-get="/admin/api/live-logs" hx-trigger="load, every 3s"
                 hx-swap="innerHTML scroll:bottom"
-                class="bg-gray-900 text-gray-100 p-4 rounded-md font-mono text-sm overflow-y-auto"
+                class="bg-gray-900 text-gray-100 p-4 rounded-md font-mono text-sm overflow-y-auto overflow-x-auto whitespace-pre-wrap break-all"
                 style="max-height: 600px;">
                 <div class="flex justify-center items-center py-8">
                     <span class="text-gray-500">加载中...</span>
@@ -50,7 +46,7 @@
 <script>
     const logsContainer = document.getElementById('live-logs');
 
-    document.body.addEventListener('htmx:afterSwap', function(event) {
+    document.body.addEventListener('htmx:afterSwap', function (event) {
         if (event.detail.target.id === 'live-logs') {
             logsContainer.scrollTop = logsContainer.scrollHeight;
         }

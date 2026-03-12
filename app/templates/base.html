@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="zh-CN" class="h-full bg-gray-50">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -24,13 +25,16 @@
             width: 8px;
             height: 8px;
         }
+
         ::-webkit-scrollbar-track {
             background: #f1f1f1;
         }
+
         ::-webkit-scrollbar-thumb {
             background: #888;
             border-radius: 4px;
         }
+
         ::-webkit-scrollbar-thumb:hover {
             background: #555;
         }
@@ -39,9 +43,11 @@
         .htmx-indicator {
             display: none;
         }
+
         .htmx-request .htmx-indicator {
             display: inline-block;
         }
+
         .htmx-request.htmx-indicator {
             display: inline-block;
         }
@@ -50,14 +56,21 @@
         .fade-in {
             animation: fadeIn 0.3s ease-in;
         }
+
         @keyframes fadeIn {
-            from { opacity: 0; }
-            to { opacity: 1; }
+            from {
+                opacity: 0;
+            }
+
+            to {
+                opacity: 1;
+            }
         }
     </style>
 
     {% block extra_head %}{% endblock %}
 </head>
+
 <body class="h-full" x-data="{
     sidebarOpen: true,
     async logout() {
@@ -82,14 +95,16 @@
 }">
     <div class="min-h-full">
         <!-- 顶部导航栏 -->
-        <nav class="bg-indigo-600 shadow-lg">
+        <nav class="bg-slate-800 shadow-lg">
             <div class="mx-auto px-4 sm:px-6 lg:px-8">
                 <div class="flex h-16 items-center justify-between">
                     <!-- Logo 和切换按钮 -->
                     <div class="flex items-center">
-                        <button @click="sidebarOpen = !sidebarOpen" class="text-white hover:bg-indigo-700 p-2 rounded-md">
+                        <button @click="sidebarOpen = !sidebarOpen"
+                            class="text-white hover:bg-indigo-700 p-2 rounded-md">
                             <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M4 6h16M4 12h16M4 18h16" />
                             </svg>
                         </button>
                         <div class="ml-4 flex items-center">
@@ -102,18 +117,19 @@
                         <!-- 实时状态指示器 -->
                         <div class="flex items-center text-white">
                             <span class="relative flex h-3 w-3">
-                                <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                                <span
+                                    class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
                                 <span class="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
                             </span>
                             <span class="ml-2 text-sm">服务运行中</span>
                         </div>
 
                         <!-- 登出按钮 -->
-                        <button
-                            @click="logout()"
+                        <button @click="logout()"
                             class="flex items-center text-white hover:bg-indigo-700 px-3 py-2 rounded-md text-sm font-medium transition-colors">
                             <svg class="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
                             </svg>
                             登出
                         </button>
@@ -124,51 +140,51 @@
 
         <div class="flex">
             <!-- 侧边栏 -->
-            <aside
-                x-show="sidebarOpen"
-                x-transition:enter="transition ease-out duration-200"
-                x-transition:enter-start="transform -translate-x-full"
-                x-transition:enter-end="transform translate-x-0"
-                x-transition:leave="transition ease-in duration-200"
-                x-transition:leave-start="transform translate-x-0"
-                x-transition:leave-end="transform -translate-x-full"
-                class="w-64 bg-white shadow-lg min-h-screen">
+            <aside x-show="sidebarOpen" x-transition:enter="transition ease-out duration-200"
+                x-transition:enter-start="transform -translate-x-full" x-transition:enter-end="transform translate-x-0"
+                x-transition:leave="transition ease-in duration-200" x-transition:leave-start="transform translate-x-0"
+                x-transition:leave-end="transform -translate-x-full" class="w-64 bg-white shadow-lg min-h-screen">
                 <nav class="mt-5 px-2 space-y-1">
                     {% set current_path = request.url.path %}
 
                     <!-- 仪表盘 -->
                     <a href="/admin"
-                       class="{% if current_path == '/admin' or current_path == '/admin/' %}bg-indigo-100 text-indigo-700{% else %}text-gray-700 hover:bg-gray-100{% endif %} group flex items-center px-3 py-2 text-sm font-medium rounded-md">
+                        class="{% if current_path == '/admin' or current_path == '/admin/' %}bg-indigo-100 text-indigo-700{% else %}text-gray-700 hover:bg-gray-100{% endif %} group flex items-center px-3 py-2 text-sm font-medium rounded-md">
                         <svg class="mr-3 h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
                         </svg>
                         仪表盘
                     </a>
 
                     <!-- 配置管理 -->
                     <a href="/admin/config"
-                       class="{% if '/config' in current_path %}bg-indigo-100 text-indigo-700{% else %}text-gray-700 hover:bg-gray-100{% endif %} group flex items-center px-3 py-2 text-sm font-medium rounded-md">
+                        class="{% if '/config' in current_path %}bg-indigo-100 text-indigo-700{% else %}text-gray-700 hover:bg-gray-100{% endif %} group flex items-center px-3 py-2 text-sm font-medium rounded-md">
                         <svg class="mr-3 h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                         </svg>
                         配置管理
                     </a>
 
                     <!-- 实时日志 -->
                     <a href="/admin/logs"
-                       class="{% if '/logs' in current_path %}bg-indigo-100 text-indigo-700{% else %}text-gray-700 hover:bg-gray-100{% endif %} group flex items-center px-3 py-2 text-sm font-medium rounded-md">
+                        class="{% if '/logs' in current_path %}bg-indigo-100 text-indigo-700{% else %}text-gray-700 hover:bg-gray-100{% endif %} group flex items-center px-3 py-2 text-sm font-medium rounded-md">
                         <svg class="mr-3 h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                         </svg>
                         实时日志
                     </a>
 
                     <!-- Token 管理 -->
                     <a href="/admin/tokens"
-                       class="{% if '/tokens' in current_path %}bg-indigo-100 text-indigo-700{% else %}text-gray-700 hover:bg-gray-100{% endif %} group flex items-center px-3 py-2 text-sm font-medium rounded-md">
+                        class="{% if '/tokens' in current_path %}bg-indigo-100 text-indigo-700{% else %}text-gray-700 hover:bg-gray-100{% endif %} group flex items-center px-3 py-2 text-sm font-medium rounded-md">
                         <svg class="mr-3 h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
                         </svg>
                         Token 管理
                     </a>
@@ -178,9 +194,10 @@
 
                     <!-- API 文档 -->
                     <a href="/docs" target="_blank"
-                       class="text-gray-700 hover:bg-gray-100 group flex items-center px-3 py-2 text-sm font-medium rounded-md">
+                        class="text-gray-700 hover:bg-gray-100 group flex items-center px-3 py-2 text-sm font-medium rounded-md">
                         <svg class="mr-3 h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                         </svg>
                         API 文档
                     </a>
@@ -224,4 +241,5 @@
 
     {% block extra_scripts %}{% endblock %}
 </body>
+
 </html>
