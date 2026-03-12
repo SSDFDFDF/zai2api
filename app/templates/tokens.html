@@ -41,7 +41,7 @@
                 批量验证
             </button>
             <button @click="showAddModal = true"
-                class="px-4 py-2 bg-slate-800 text-white rounded-md text-sm font-medium hover:bg-indigo-700 flex items-center">
+                class="px-4 py-2 bg-slate-800 text-white rounded-md text-sm font-medium hover:bg-slate-700 flex items-center">
                 <svg class="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
                 </svg>
@@ -371,7 +371,7 @@
                                 bulk_tokens: bulkTokens
                             })" hx-target="#notification"
                         @htmx:after-request="showAddModal = false; newToken = ''; bulkTokens = ''; htmx.trigger('body', 'tokenListRefresh'); htmx.trigger('body', 'statsRefresh')"
-                        class="px-4 py-2 bg-slate-800 text-white rounded-md text-sm font-medium hover:bg-indigo-700">
+                        class="px-4 py-2 bg-slate-800 text-white rounded-md text-sm font-medium hover:bg-slate-700">
                         添加
                     </button>
                 </div>

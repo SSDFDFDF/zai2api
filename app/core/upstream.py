@@ -734,10 +734,9 @@ class UpstreamClient:
                 max_tokens=request.max_tokens,
             )
             # DEBUG 日志脱敏：仅记录 body 结构，不记录消息内容
-            if self.logger.isEnabledFor(10):  # logging.DEBUG = 10
-                sanitized = {k: (f"[{len(v)} messages]" if k == "messages" else v)
-                             for k, v in body.items()}
-                self.logger.debug(f"Upstream request body (sanitized): {sanitized}")
+            sanitized = {k: (f"[{len(v)} messages]" if k == "messages" else v)
+                         for k, v in body.items()}
+            self.logger.debug(f"Upstream request body (sanitized): {sanitized}")
 
             # 签名并生成最终 URL 和 headers（复用已并行拉取的 fe_version）
             signed_url, headers, _fe_version = await sign_request(
