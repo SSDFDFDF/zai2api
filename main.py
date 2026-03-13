@@ -122,6 +122,10 @@ async def lifespan(app: FastAPI):
 
     if _model_refresh_task and not _model_refresh_task.done():
         _model_refresh_task.cancel()
+        try:
+            await _model_refresh_task
+        except asyncio.CancelledError:
+            pass
 
     await stop_token_automation_scheduler()
     logger.info("🔄 正在停止 guest session pool...")
@@ -134,6 +138,11 @@ async def lifespan(app: FastAPI):
     from app.core.openai import get_upstream_client_if_ready
     upstream_client = get_upstream_client_if_ready()
     if upstream_client:
+        session_manager = getattr(upstream_client, "session_manager", None)
+        if session_manager is None:
+            session_manager = getattr(upstream_client, "_session_manager", None)
+        if session_manager is not None and hasattr(session_manager, "close"):
+            await session_manager.close()
         await upstream_client.close()
 
     logger.info("🔄 正在关闭数据库连接...")

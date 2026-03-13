@@ -149,7 +149,8 @@ class RequestLogDAO:
         start_time: datetime,
         end_time: datetime,
         provider: str = None,
-        model: str = None
+        model: str = None,
+        limit: int = 10000,
     ) -> List[Dict]:
         stmt = select(RequestLog.__table__).where(
             RequestLog.timestamp.between(start_time, end_time)
@@ -159,7 +160,7 @@ class RequestLogDAO:
         if model:
             stmt = stmt.where(RequestLog.model == model)
 
-        stmt = stmt.order_by(RequestLog.timestamp.desc(), RequestLog.id.desc())
+        stmt = stmt.order_by(RequestLog.timestamp.desc(), RequestLog.id.desc()).limit(limit)
 
         async with self.session_factory() as session:
             result = await session.execute(stmt)

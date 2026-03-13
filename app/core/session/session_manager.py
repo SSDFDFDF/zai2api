@@ -227,6 +227,8 @@ class SessionManager:
                 await self._cleanup_task
             except asyncio.CancelledError:
                 pass
+        async with self._store._lock:
+            self._store._data.clear()
 
     # ──────────────────────────────────────────────────────────────────
     # 内部：会话匹配

@@ -919,6 +919,10 @@ class UpstreamClient:
 
         except Exception as e:
             self.logger.error(f"❌ {self.name} 响应失败: {str(e)}")
+            try:
+                await self._release_guest_session(transformed)
+            except Exception:
+                pass
             return handle_error(e, "请求处理")
 
     async def _create_stream_response(

@@ -65,7 +65,10 @@ def _prune_attempts(attempts: list[float]) -> list[float]:
 def check_login_rate_limit(client_id: str) -> bool:
     attempts = _login_attempts.get(client_id, [])
     attempts = _prune_attempts(attempts)
-    _login_attempts[client_id] = attempts
+    if attempts:
+        _login_attempts[client_id] = attempts
+    else:
+        _login_attempts.pop(client_id, None)
     return len(attempts) < LOGIN_MAX_ATTEMPTS
 
 

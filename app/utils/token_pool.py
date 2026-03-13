@@ -475,8 +475,14 @@ class TokenPool:
         logger.info(f"🔍 开始 Token 池健康检查... (共 {total_tokens} 个 Token)")
 
         # 并发执行所有 Token 的健康检查
+        semaphore = asyncio.Semaphore(10)
+
+        async def _check_with_limit(token: str):
+            async with semaphore:
+                return await self.health_check_token(token)
+
         tasks = [
-            self.health_check_token(token)
+            _check_with_limit(token)
             for token in self.token_statuses.keys()
         ]
 

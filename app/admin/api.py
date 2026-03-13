@@ -3,6 +3,7 @@
 用于 htmx 调用的 HTML 片段返回
 """
 from datetime import datetime
+from collections import deque
 from html import escape
 from pathlib import Path
 import re
@@ -627,15 +628,14 @@ async def get_live_logs(request: Request):
             try:
                 with open(log_file, 'r', encoding='utf-8') as f:
                     # 读取最后 lines_limit 行
-                    all_lines = f.readlines()
-                    logs = all_lines[-lines_limit:]
+                    logs = list(deque(f, maxlen=lines_limit))
             except Exception as e:
                 logs = [f"# [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 读取日志失败: {str(e)}"]
 
     if not logs:
         logs = [f"# [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 暂无日志数据"]
 
-    html = ""
+    html_parts = []
     for log in logs:
         log_line = log.strip()
         if not log_line:
@@ -664,9 +664,11 @@ async def get_live_logs(request: Request):
         # 转义 HTML 特殊字符
         log_escaped = log_line.replace('<', '&lt;').replace('>', '&gt;')
 
-        html += f'<div class="{color_class} py-0.5 hover:bg-gray-800 px-2 rounded transition-colors">{icon} {log_escaped}</div>'
+        html_parts.append(
+            f'<div class="{color_class} py-0.5 hover:bg-gray-800 px-2 rounded transition-colors">{icon} {log_escaped}</div>'
+        )
 
-    return HTMLResponse(html)
+    return HTMLResponse("".join(html_parts))
 
 @router.get(
     "/live-logs/download",

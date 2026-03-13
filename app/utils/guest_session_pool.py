@@ -5,15 +5,12 @@
 
 import asyncio
 import time
-import uuid
 from dataclasses import dataclass, field
 from threading import Lock
-from typing import Dict, List, Optional, Set
+from typing import Dict, Any, List, Optional, Set
 
 import httpx
 import jwt
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import ec
 
 from app.core.config import settings
 from app.core.http_client import get_proxy_config as _get_proxy_config, build_timeout as _build_timeout, build_limits as _build_limits
@@ -25,18 +22,13 @@ from app.utils.logger import logger
 AUTH_URL = "https://chat.z.ai/api/v1/auths/"
 CHATS_URL = "https://chat.z.ai/api/v1/chats/"
 
-# --- 本地 Guest Token 生成相关 ---
-# 使用固定的私钥，确保生成符合 ES256 规范的 JWT
-_GUEST_PRIVATE_KEY_PEM = (
-    b"-----BEGIN PRIVATE KEY-----\n"
-    b"MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgYVjOshM6xL2vPz2F\n"
-    b"vX/wWfIDxN7SId7hA54fR2m97p6hRANCAATfT6eF6O/n9P5n6p6v7z/z7o+0e5yJ\n"
-    b"XUfG4I8ZfR9fXqYh7z4p6v7z/z7o+0e5yJXUfG4I8ZfR9fXqYh7z4p6v7z/z7o\n"
-    b"-----END PRIVATE KEY-----\n"
-)
-# 注意：上面的 PEM 是示意性的，实际执行时我们将生成或使用一个稳定的 key
-# 为了简单起见，我们在运行时动态生成一个，或者使用硬编码
-_GUEST_SIGNING_KEY = ec.generate_private_key(ec.SECP256R1())
+
+def _decode_token_payload(token: str) -> Dict[str, Any]:
+    """无需校验签名，仅解密 JWT Payload 以获取元数据。"""
+    try:
+        return jwt.decode(token, options={"verify_signature": False})
+    except Exception:
+        return {}
 
 
 # _get_proxy_config, _build_timeout, _build_limits, _build_dynamic_headers
@@ -132,27 +124,49 @@ class GuestSessionPool:
         await asyncio.gather(*(_cleanup(session) for session in sessions))
 
     async def _create_session(self) -> GuestSession:
-        """创建一个新的匿名访客会话。优先本地生成 token 以达到毫秒级响应。"""
-        # 内部值解密分析结果：
-        # Header: {"alg":"ES256","typ":"JWT"}
-        # Payload: {"id":"UUID","email":"Guest-{timestamp_ms}@guest.com"}
+        """创建一个新的匿名访客会话。
         
-        user_id = str(uuid.uuid4())
-        timestamp_ms = int(time.time() * 1000)
-        email = f"Guest-{timestamp_ms}@guest.com"
-        username = f"Guest-{timestamp_ms}"
-        
-        payload = {
-            "id": user_id,
-            "email": email
-        }
+        从上游获取真实 token，并解密其内部值作为 session 元数据。
+        """
+        fe_version = await get_latest_fe_version()
+        headers = _build_dynamic_headers(fe_version)
         
         try:
-            # 使用 ES256 算法生成 token
-            token = jwt.encode(payload, _GUEST_SIGNING_KEY, algorithm="ES256")
+            async with httpx.AsyncClient(
+                timeout=_build_timeout(),
+                follow_redirects=True,
+                limits=_build_limits(),
+                proxy=_get_proxy_config(),
+            ) as client:
+                response = await client.get(AUTH_URL, headers=headers)
+
+            if response.status_code != 200:
+                raise RuntimeError(
+                    f"匿名会话创建失败: HTTP {response.status_code} {response.text[:200]}"
+                )
+
+            data = response.json()
+            token = str(data.get("token") or "").strip()
+            if not token:
+                raise RuntimeError(f"匿名会话创建失败: 未返回 token {data}")
+
+            # 优化：通过解密 token 内部值获取准确的 user_id 和 email
+            # Payload 结构通常为: {"id": "...", "email": "Guest-...@guest.com"}
+            payload = _decode_token_payload(token)
             
+            user_id = str(
+                payload.get("id") 
+                or data.get("id") 
+                or data.get("user_id") 
+                or f"guest-{token[:12]}"
+            ).strip()
+            
+            # 从 email 中提取用户名，例如 Guest-1773376198189
+            raw_email = payload.get("email") or data.get("name") or data.get("email") or ""
+            username = str(raw_email).split("@")[0] or f"Guest-{user_id[:8]}"
+
             logger.debug(
-                f"🫥 本地生成匿名会话成功: user_id={user_id}, username={username}"
+                f"🫥 获取匿名会话成功: user_id={user_id}, username={username}"
             )
             return GuestSession(
                 token=token,
@@ -160,51 +174,8 @@ class GuestSessionPool:
                 username=username,
             )
         except Exception as e:
-            logger.warning(f"⚠️ 本地生成匿名会话失败，尝试请求线上: {e}")
-            # 回退到原有逻辑，请求线上接口 (如果本地生成库环境有问题)
-            return await self._create_session_remote()
-
-    async def _create_session_remote(self) -> GuestSession:
-        """从上游接口获取匿名访客会话（作为备用路径）。"""
-        fe_version = await get_latest_fe_version()
-        headers = build_dynamic_headers(fe_version)
-        async with httpx.AsyncClient(
-            timeout=_build_timeout(),
-            follow_redirects=True,
-            limits=_build_limits(),
-            proxy=_get_proxy_config(),
-        ) as client:
-            response = await client.get(AUTH_URL, headers=headers)
-
-        if response.status_code != 200:
-            raise RuntimeError(
-                f"匿名会话创建失败: HTTP {response.status_code} {response.text[:200]}"
-            )
-
-        data = response.json()
-        token = str(data.get("token") or "").strip()
-        user_id = str(
-            data.get("id") or data.get("user_id") or data.get("uid") or ""
-        ).strip()
-        username = str(
-            data.get("name")
-            or str(data.get("email") or "").split("@")[0]
-            or f"guest-{user_id[:8] or 'session'}"
-        ).strip()
-
-        if not token:
-            raise RuntimeError(f"匿名会话创建失败: 未返回 token {data}")
-        if not user_id:
-            user_id = f"guest-{token[:12]}"
-
-        logger.debug(
-            f"🫥 远程取匿名会话成功: user_id={user_id}, username={username or 'Guest'}"
-        )
-        return GuestSession(
-            token=token,
-            user_id=user_id,
-            username=username or "Guest",
-        )
+            logger.error(f"❌ 匿名会话创建异常: {e}")
+            raise
 
     async def _delete_all_chats(self, session: GuestSession) -> bool:
         """删除匿名会话的全部对话，尽量释放并发占用。"""
@@ -290,25 +261,46 @@ class GuestSessionPool:
     async def _maintenance_loop(self):
         """后台维护：回收过期/失效会话，并补齐池容量。"""
         consecutive_failures = 0
+        recovery_wait_seconds = 300
+        force_sleep_once = 0
 
         while True:
             try:
-                if consecutive_failures > 0:
+                if force_sleep_once > 0:
+                    sleep_time = force_sleep_once
+                    force_sleep_once = 0
+                elif consecutive_failures > 0:
                     sleep_time = self.maintenance_interval * (2 ** (consecutive_failures - 1))
                 else:
                     sleep_time = self.maintenance_interval
 
                 await asyncio.sleep(sleep_time)
                 stale_sessions: List[GuestSession] = []
+                forced_removed_logs: List[str] = []
 
                 with self._lock:
                     for user_id, session in list(self._sessions.items()):
+                        force_remove = session.age > (2 * self.session_max_age)
                         should_remove = (
-                            (not session.valid or session.age > self.session_max_age)
-                            and session.active_requests == 0
+                            force_remove
+                            or (
+                                (not session.valid or session.age > self.session_max_age)
+                                and session.active_requests == 0
+                            )
                         )
                         if should_remove:
-                            stale_sessions.append(self._sessions.pop(user_id))
+                            removed = self._sessions.pop(user_id)
+                            stale_sessions.append(removed)
+                            if force_remove:
+                                forced_removed_logs.append(
+                                    f"{removed.user_id}(age={removed.age:.1f}s, "
+                                    f"active_requests={removed.active_requests}, valid={removed.valid})"
+                                )
+
+                if forced_removed_logs:
+                    logger.warning(
+                        "⚠️ 匿名会话池强制回收超龄会话: " + ", ".join(forced_removed_logs)
+                    )
 
                 await self._delete_sessions_concurrently(stale_sessions)
 
@@ -316,8 +308,12 @@ class GuestSessionPool:
                 if success is False:
                     consecutive_failures += 1
                     if consecutive_failures >= self.max_failures:
-                        logger.error(f"❌ 匿名会话池补齐连续失败 {consecutive_failures} 次达到限值，停止后台维护")
-                        break
+                        logger.warning(
+                            f"⚠️ 匿名会话池补齐连续失败 {consecutive_failures} 次达到限值，"
+                            f"进入恢复等待 {recovery_wait_seconds} 秒后继续"
+                        )
+                        consecutive_failures = 0
+                        force_sleep_once = recovery_wait_seconds
                     else:
                         next_sleep = self.maintenance_interval * (2 ** (consecutive_failures - 1))
                         logger.warning(f"⚠️ 匿名会话池补齐连续失败 {consecutive_failures} 次, 下次重试将等待 {next_sleep} 秒")
@@ -332,8 +328,12 @@ class GuestSessionPool:
                 logger.warning(f"⚠️ 匿名会话池后台维护异常: {exc}")
                 consecutive_failures += 1
                 if consecutive_failures >= self.max_failures:
-                    logger.error(f"❌ 匿名会话池后台维护异常连续 {consecutive_failures} 次达到限值，停止后台维护")
-                    break
+                    logger.warning(
+                        f"⚠️ 匿名会话池后台维护异常连续 {consecutive_failures} 次达到限值，"
+                        f"进入恢复等待 {recovery_wait_seconds} 秒后继续"
+                    )
+                    consecutive_failures = 0
+                    force_sleep_once = recovery_wait_seconds
 
     async def initialize(self):
         """初始化匿名会话池。"""
@@ -404,6 +404,7 @@ class GuestSessionPool:
     ) -> GuestSession:
         """按最小忙碌度获取一个可用匿名会话。"""
         excluded = exclude_user_ids or set()
+        max_sessions = self.pool_size * 3
 
         while True:
             candidates = self._list_valid_sessions(exclude_user_ids=excluded)
@@ -418,15 +419,32 @@ class GuestSessionPool:
                         current.active_requests += 1
                         return current
 
+            with self._lock:
+                current_size = len(self._sessions)
+            if current_size >= max_sessions:
+                raise RuntimeError(
+                    f"匿名会话池容量超限: current={current_size}, max={max_sessions}"
+                )
+
             new_session = await self._create_session()
             if new_session.user_id in excluded:
                 await self._delete_all_chats(new_session)
                 continue
 
             with self._lock:
-                new_session.active_requests = 1
-                self._sessions[new_session.user_id] = new_session
-                return new_session
+                current_size = len(self._sessions)
+                if current_size >= max_sessions:
+                    overflow_message = (
+                        f"匿名会话池容量超限: current={current_size}, max={max_sessions}"
+                    )
+                else:
+                    new_session.active_requests = 1
+                    self._sessions[new_session.user_id] = new_session
+                    return new_session
+
+            await self._delete_all_chats(new_session)
+            logger.warning(f"⚠️ {overflow_message}, 已放弃新建会话: {new_session.user_id}")
+            raise RuntimeError(overflow_message)
 
     def release(self, user_id: str):
         """释放一个匿名会话占用。"""

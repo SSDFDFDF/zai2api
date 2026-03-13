@@ -131,7 +131,8 @@ async def init_db():
 
 async def close_db():
     """关闭数据库连接"""
-    global engine
+    global engine, async_session
     if engine is not None:
         await engine.dispose()
         engine = None  # 释放后重置为 None
+    async_session = None

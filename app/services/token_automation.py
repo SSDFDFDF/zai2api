@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from app.core.config import settings
+from app.services.request_log_dao import get_request_log_dao
 from app.services.token_dao import TokenDAO, get_token_dao
 from app.services.token_importer import TokenImportSummary, import_tokens_from_directory
 from app.utils.logger import logger
@@ -142,6 +143,10 @@ class TokenAutomationScheduler:
                 self._auto_chat_cleanup_loop(),
                 name="token-auto-chat-cleanup",
             ),
+            asyncio.create_task(
+                self._auto_log_cleanup_loop(),
+                name="token-auto-log-cleanup",
+            ),
         ]
         logger.info("✅ Token 自动任务调度器已启动")
 
@@ -256,6 +261,38 @@ class TokenAutomationScheduler:
                 logger.exception(f"❌ 定期会话清理失败: {exc}")
                 wait_seconds = 3600  # 执行出错的话，过 1 小时再重试
             
+            await self._wait_or_stop(wait_seconds)
+
+    async def _auto_log_cleanup_loop(self) -> None:
+        while not self._stop_event.is_set():
+            wait_seconds = 86400  # 默认一天执行一次
+
+            try:
+                interval_days = max(
+                    int(getattr(settings, "LOG_CLEANUP_INTERVAL_DAYS", 1)),
+                    1,
+                )
+                retention_days = max(
+                    int(getattr(settings, "LOG_RETENTION_DAYS", 30)),
+                    1,
+                )
+                wait_seconds = interval_days * 86400
+
+                request_log_dao = get_request_log_dao()
+                deleted_count = await request_log_dao.delete_old_logs(
+                    days=retention_days
+                )
+                logger.info(
+                    "🧹 定期请求日志清理完成: retention_days={} deleted={}",
+                    retention_days,
+                    deleted_count,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.exception(f"❌ 定期请求日志清理失败: {exc}")
+                wait_seconds = 3600  # 执行出错的话，过 1 小时再重试
+
             await self._wait_or_stop(wait_seconds)
 
     async def _wait_or_stop(self, timeout: int) -> None:

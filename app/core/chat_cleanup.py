@@ -16,9 +16,14 @@ class ChatCleanupSummary:
     success_count: int = 0
     failed_count: int = 0
 
-async def delete_chats_for_token(token: str) -> bool:
+async def delete_chats_for_token(
+    token: str,
+    clients: Optional[SharedHttpClients] = None,
+) -> bool:
     """Delete all chat sessions for a given token."""
-    clients = SharedHttpClients()
+    owns_clients = clients is None
+    if clients is None:
+        clients = SharedHttpClients()
     client = clients.get_client()
     
     fe_version = await get_latest_fe_version()
@@ -41,6 +46,9 @@ async def delete_chats_for_token(token: str) -> bool:
     except Exception as e:
         logger.warning(f"⚠️ 清理会话时发生错误 (Token: {token[:15]}...): {e}")
         return False
+    finally:
+        if owns_clients:
+            await clients.close()
 
 async def run_chat_cleanup(
     interval_days: int,
@@ -58,23 +66,26 @@ async def run_chat_cleanup(
     
     success_count = 0
     failed_count = 0
-    
-    for token_record in tokens:
-        token_id = int(token_record["id"])
-        token_str = str(token_record["token"])
-        
-        success = await delete_chats_for_token(token_str)
-        if success:
-            await token_dao.update_last_chat_cleanup(token_id)
-            success_count += 1
-            logger.debug(f"✅ 成功清理 Token 的会话: id={token_id}")
-        else:
-            failed_count += 1
-            logger.debug(f"❌ 清理 Token 的会话失败: id={token_id}")
+    clients = SharedHttpClients()
+    try:
+        for token_record in tokens:
+            token_id = int(token_record["id"])
+            token_str = str(token_record["token"])
             
-        # 间隔2秒，避免并发过高或被风控
-        await asyncio.sleep(2.0)
-        
+            success = await delete_chats_for_token(token_str, clients=clients)
+            if success:
+                await token_dao.update_last_chat_cleanup(token_id)
+                success_count += 1
+                logger.debug(f"✅ 成功清理 Token 的会话: id={token_id}")
+            else:
+                failed_count += 1
+                logger.debug(f"❌ 清理 Token 的会话失败: id={token_id}")
+                
+            # 间隔2秒，避免并发过高或被风控
+            await asyncio.sleep(2.0)
+    finally:
+        await clients.close()
+
     return ChatCleanupSummary(
         total_checked=len(tokens),
         success_count=success_count,

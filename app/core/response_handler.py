@@ -556,11 +556,14 @@ class ResponseHandler:
         delta_content = data.get("delta_content", "")
         edit_content = data.get("edit_content", "")
         edit_index = data.get("edit_index")
+        max_buffered_len = 50000
 
         current_text = ""
         if delta_content:
             current_text = delta_content
-            ctx.buffered_content += delta_content
+            ctx.buffered_content = (
+                ctx.buffered_content + delta_content
+            )[-max_buffered_len:]
         elif edit_content:
             current_text = edit_content
             if edit_index is not None and isinstance(edit_index, int):
@@ -579,6 +582,10 @@ class ResponseHandler:
                     + edit_content
                     + ctx.buffered_content[safe_idx:]
                 )
+                if len(ctx.buffered_content) > max_buffered_len:
+                    ctx.buffered_content = ctx.buffered_content[
+                        -max_buffered_len:
+                    ]
                 self.logger.debug(
                     "🔧 edit_index={}: 在位置 {} 插入 {} 字符, buffered 总长={}",
                     edit_index,
@@ -587,7 +594,9 @@ class ResponseHandler:
                     len(ctx.buffered_content),
                 )
             else:
-                ctx.buffered_content += edit_content
+                ctx.buffered_content = (
+                    ctx.buffered_content + edit_content
+                )[-max_buffered_len:]
 
         return current_text
 
@@ -726,6 +735,11 @@ class ResponseHandler:
         # 正在排掉思维残留
         if ctx.draining_details:
             ctx.details_drain_buf += current_text
+            if len(ctx.details_drain_buf) > 65536:
+                self.logger.warning("⚠️ details_drain_buf 超过 64KB 上限，强制重置 draining_details 状态")
+                ctx.draining_details = False
+                ctx.details_drain_buf = ""
+                return current_text
             m = self._THINKING_CLOSE_RE.search(ctx.details_drain_buf)
             if m:
                 remainder = ctx.details_drain_buf[m.end() :].lstrip()
@@ -1084,8 +1098,8 @@ class ResponseHandler:
 
         集成 XML 解析优先，JSON 解析降级。
         """
-        final_content = ""
-        reasoning_content = ""
+        final_content_parts: List[str] = []
+        reasoning_content_parts: List[str] = []
         tool_calls_accum: List[Dict[str, Any]] = []
         usage_info: Dict[str, Any] = {
             "prompt_tokens": 0,
@@ -1151,18 +1165,21 @@ class ResponseHandler:
                 edit_index = data.get("edit_index")
 
                 if phase == "thinking" and delta_content:
-                    reasoning_content += self.clean_reasoning_delta(
+                    cleaned_reasoning = self.clean_reasoning_delta(
                         delta_content
                     )
+                    if cleaned_reasoning:
+                        reasoning_content_parts.append(cleaned_reasoning)
 
                 elif phase == "answer":
                     if delta_content:
-                        final_content += delta_content
+                        final_content_parts.append(delta_content)
                     elif edit_content:
                         ec = self.extract_answer_content(edit_content)
                         if edit_index is not None and isinstance(
                             edit_index, int
                         ):
+                            final_content = "".join(final_content_parts)
                             safe_idx = max(
                                 0, min(edit_index, len(final_content))
                             )
@@ -1171,8 +1188,10 @@ class ResponseHandler:
                                 + ec
                                 + final_content[safe_idx:]
                             )
+                            final_content_parts = [final_content]
                         else:
-                            final_content += ec
+                            if ec:
+                                final_content_parts.append(ec)
 
                 elif phase == "other" and edit_content:
                     if not in_glm_tool_execution:
@@ -1180,6 +1199,7 @@ class ResponseHandler:
                         if edit_index is not None and isinstance(
                             edit_index, int
                         ):
+                            final_content = "".join(final_content_parts)
                             safe_idx = max(
                                 0, min(edit_index, len(final_content))
                             )
@@ -1188,11 +1208,15 @@ class ResponseHandler:
                                 + ec
                                 + final_content[safe_idx:]
                             )
+                            final_content_parts = [final_content]
                         else:
-                            final_content += ec
+                            if ec:
+                                final_content_parts.append(ec)
 
                 elif phase == "search" or chunk_type == "web_search":
-                    final_content += self.format_search_results(data)
+                    search_content = self.format_search_results(data)
+                    if search_content:
+                        final_content_parts.append(search_content)
 
                 tool_calls_accum.extend(
                     self.normalize_tool_calls(
@@ -1210,6 +1234,7 @@ class ResponseHandler:
             self.logger.error("❌ 非流式响应处理错误: {}", e)
             return handle_error(e, "非流式聚合")
 
+        final_content = "".join(final_content_parts)
         if not tool_calls_accum:
             tool_calls_accum, final_content = self.toolify_handler.extract_non_stream_tool_calls(
                 final_content,
@@ -1226,9 +1251,9 @@ class ResponseHandler:
         final_content = self._CITATION_FULL_RE.sub("", final_content)
         final_content = self._CITATION_TAIL_RE.sub("", final_content)
 
-        reasoning_content = (reasoning_content or "").strip()
+        reasoning_content = "".join(reasoning_content_parts).strip()
 
-        if not final_content and reasoning_content:
+        if not final_content and reasoning_content_parts:
             final_content = reasoning_content
 
         return create_openai_response_with_reasoning(

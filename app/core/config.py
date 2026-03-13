@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     )
     CHAT_CLEANUP_INTERVAL_DAYS: int = int(os.getenv("CHAT_CLEANUP_INTERVAL_DAYS", "7"))
 
+    # Request Log Cleanup
+    LOG_CLEANUP_INTERVAL_DAYS: int = int(os.getenv("LOG_CLEANUP_INTERVAL_DAYS", "1"))
+    LOG_RETENTION_DAYS: int = int(os.getenv("LOG_RETENTION_DAYS", "30"))
+
     # Model Configuration
     GLM45_MODEL: str = os.getenv("GLM45_MODEL", "GLM-4.5")
     GLM45_THINKING_MODEL: str = os.getenv("GLM45_THINKING_MODEL", "GLM-4.5-Thinking")
