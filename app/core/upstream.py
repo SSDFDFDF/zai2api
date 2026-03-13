@@ -44,7 +44,7 @@ from app.core.retry_policy import (
 )
 from app.core.response_handler import ResponseHandler
 from app.core.toolify import ToolifyRequestHandler
-from app.core.session import SessionManager, SessionResult
+from app.core.session import SessionManager
 from app.core.session.session_content import (
     build_session_body_messages,
     extract_turn_content,
@@ -228,6 +228,27 @@ class UpstreamClient:
             excluded_tokens=excluded_tokens,
             excluded_guest_user_ids=excluded_guest_user_ids,
         )
+
+    async def _commit_session_if_needed(self, transformed: Dict[str, Any]) -> None:
+        """在上游已接受请求后，提交连续会话状态。"""
+        commit_info = transformed.pop("session_commit", None)
+        if not isinstance(commit_info, dict):
+            return
+
+        action = str(commit_info.get("action") or "")
+        try:
+            if action == "reuse":
+                await self._session_manager.commit_session_turn(
+                    model=str(commit_info["model"]),
+                    messages=list(commit_info["messages"]),
+                    chat_id=str(commit_info["chat_id"]),
+                    message_id=str(commit_info["message_id"]),
+                )
+                return
+
+            self.logger.warning("⚠️ 未知会话提交动作: {}", action)
+        except Exception as exc:
+            self.logger.warning("⚠️ 提交会话状态失败: {}", exc)
 
     # ------------------------------------------------------------------
     # 错误解析（委托到 retry_policy 工具函数）
@@ -673,6 +694,7 @@ class UpstreamClient:
         tools = toolify_prepared.tools
         trigger_signal = toolify_prepared.trigger_signal
         normalized_messages = toolify_prepared.normalized_messages
+        session_commit: Optional[Dict[str, Any]] = None
 
         # 并行拉取 auth_info 和 fe_version，减少 TTFB
         auth_info, fe_version = await asyncio.gather(
@@ -721,27 +743,51 @@ class UpstreamClient:
                     model=request.model,
                     messages=raw_messages,
                 )
+
+                # Token 亲和性：待确认会话（首轮重试）如果 token 已切换，
+                # 则原 chat_id 不可用，需重新 precreate。
+                if (
+                    session_result
+                    and not session_result.parent_id
+                    and session_result.bound_token
+                    and session_result.bound_token != token
+                ):
+                    self.logger.debug(
+                        "⚠️ Token 已切换，跳过待确认会话 chat_id={}",
+                        session_result.chat_id[:8],
+                    )
+                    session_result = None
+
                 if session_result:
                     # Continuous session: reuse chat_id, chain via parent_id
                     chat_id = session_result.chat_id
-                    message_id = session_result.message_id
-                    user_msg_id = generate_uuid()
+                    user_msg_id = session_result.message_id
+                    message_id = generate_uuid()
                     parent_id = session_result.parent_id
+                    is_first_turn_retry = not parent_id
                     if tools:
                         trigger_signal = resolve_trigger_signal(
                             session_result, trigger_signal, self.logger,
                         )
                     self.logger.debug(
-                        "♻️ 复用会话 chat_id={}, parent_id={}",
+                        "♻️ {} chat_id={}, parent_id={}",
+                        "首轮重试复用" if is_first_turn_retry else "复用会话",
                         chat_id[:8],
                         parent_id[:8] if parent_id else "None",
                     )
                     session_body_messages = build_session_body_messages(
                         normalized_messages=normalized_messages,
                         session_turn_content=session_turn_content,
-                        is_new_session=False,
+                        is_new_session=is_first_turn_retry,
                         inject_system=settings.SESSION_SYSTEM_INJECT,
                     )
+                    session_commit = {
+                        "action": "reuse",
+                        "model": request.model,
+                        "messages": raw_messages,
+                        "chat_id": chat_id,
+                        "message_id": user_msg_id,
+                    }
                 else:
                     # New session: precreate chat on upstream
                     message_id = generate_uuid()
@@ -764,15 +810,23 @@ class UpstreamClient:
                         mcp_servers=features.get("mcp_servers", []),
                     )
                     parent_id = None
-                    # Store session for future reuse
+                    # 立即注册待确认会话（last_message_id 为空），
+                    # 使重试时 find_session 能复用此 chat_id，避免重复 precreate。
                     await self._session_manager.create_session(
                         auth_token=token,
                         model=request.model,
                         messages=raw_messages,
                         chat_id=chat_id,
-                        message_id=message_id,
+                        message_id="",
                         trigger_signal=trigger_signal if tools else "",
                     )
+                    session_commit = {
+                        "action": "reuse",
+                        "model": request.model,
+                        "messages": raw_messages,
+                        "chat_id": chat_id,
+                        "message_id": user_msg_id,
+                    }
 
                 # Session mode: send prepared messages
                 messages, files = await process_multimodal_messages(
@@ -867,6 +921,7 @@ class UpstreamClient:
             "guest_user_id": guest_user_id,
             "trigger_signal": trigger_signal,
             "tools": tools,
+            "session_commit": session_commit,
         }
 
 
@@ -985,8 +1040,11 @@ class UpstreamClient:
                         self.logger.error(f"❌ {self.name} 响应失败: {error_msg}")
                         return handle_error(Exception(error_message or error_msg))
 
+                    await self._commit_session_if_needed(transformed)
                     try:
-                        result = await self.transform_response(response, request, transformed)
+                        result = await self.transform_response(
+                            response, request, transformed
+                        )
                     finally:
                         await self._release_guest_session(transformed)
 
@@ -1204,6 +1262,7 @@ class UpstreamClient:
                         }
                     }
 
+                await self._commit_session_if_needed(transformed)
                 chat_id = transformed["chat_id"]
                 model = transformed["model"]
 

@@ -40,10 +40,10 @@ class SessionResult:
     """复用或新建的对话 ID。"""
 
     message_id: str
-    """本次请求生成的消息 ID（current_user_message_id）。"""
+    """本次请求生成的用户消息 ID（current_user_message_id）。"""
 
     parent_id: Optional[str]
-    """连续会话时指向上次的 message_id，新对话时为 None。"""
+    """连续会话时指向上次的 current_user_message_id，新对话时为 None。"""
 
     is_new: bool
     """True = 新建对话，False = 复用已有会话。"""
@@ -108,9 +108,10 @@ class SessionManager:
     ) -> Optional[SessionResult]:
         """Find matching continuous session by fingerprint. Returns None if not found.
 
-        Unlike find_or_create_session, this method only searches -- it never
-        creates a new session.  On match it updates fingerprints, last_message_id
-        and timestamps so that subsequent turns keep chaining correctly.
+        This method is intentionally read-only.  It only returns the matched
+        session and the IDs needed for the current request; the caller must
+        commit the new current_user_message_id after the upstream request is
+        accepted.
 
         Args:
             model: Model name used for index grouping.
@@ -132,15 +133,7 @@ class SessionManager:
         session = match
         message_id = _new_uuid()
         chat_id = session["chat_id"]
-        parent_id = session.get("last_message_id")
-
-        # Update session: new fingerprints + new message_id
-        new_fps = self._fp.collect_fingerprints(messages)
-        session["fingerprints"] = new_fps
-        session["last_message_id"] = message_id
-        session["last_update"] = time.time()
-        await self._save_session(client_fp, chat_id, session)
-        await self._touch_fp_index(client_fp, chat_id)
+        parent_id = session.get("last_message_id") or None
 
         logger.debug(
             f"♻️ 连续会话复用: chat_id={chat_id[:8]}... "
@@ -176,7 +169,7 @@ class SessionManager:
             model: Model name for index grouping.
             messages: Full message list (OpenAI format) for fingerprint collection.
             chat_id: Chat ID returned by the upstream pre-create endpoint.
-            message_id: UUID generated for this turn's message.
+            message_id: current_user_message_id generated for this turn.
             trigger_signal: Toolify XML trigger signal for this chat session.
             client_id: Optional explicit client ID (used for index key if provided).
 
@@ -213,6 +206,46 @@ class SessionManager:
             trigger_signal=trigger_signal,
         )
 
+    async def commit_session_turn(
+        self,
+        model: str,
+        messages: List[Dict[str, Any]],
+        chat_id: str,
+        message_id: str,
+        client_id: Optional[str] = None,
+    ) -> None:
+        """在上游成功接收请求后，推进连续会话链指针。
+
+        Args:
+            model: Model name for index grouping.
+            messages: Full message list (OpenAI format) for fingerprint update.
+            chat_id: Existing upstream chat ID.
+            message_id: Accepted current_user_message_id for this turn.
+            client_id: Optional explicit client ID (used for index key if provided).
+        """
+        self._ensure_cleanup_started()
+
+        index_identifier = client_id or model
+        client_fp = self._fp.generate_client_fingerprint(index_identifier, model)
+        session = await self._store.get(_session_key(client_fp, chat_id))
+        if not session:
+            logger.warning(
+                "⚠️ 提交连续会话失败: 未找到 chat_id={} 的会话记录",
+                chat_id[:8],
+            )
+            return
+
+        session["fingerprints"] = self._fp.collect_fingerprints(messages)
+        session["last_message_id"] = message_id
+        session["last_update"] = time.time()
+        await self._save_session(client_fp, chat_id, session)
+        await self._touch_fp_index(client_fp, chat_id)
+        logger.debug(
+            "💾 连续会话已提交: chat_id={} last_message_id={}",
+            chat_id[:8],
+            message_id[:8],
+        )
+
     async def update_session_message_id(
         self,
         client_fp_or_chat_id: str,
@@ -221,8 +254,8 @@ class SessionManager:
     ) -> None:
         """（可选）手动刷新会话的 last_message_id。
 
-        通常无需调用——find_or_create_session 已经在创建/匹配时更新。
-        当需要从上游响应中提取真实 assistant message_id 时可调用。
+        通常无需调用——会话状态会在上游成功接收请求后提交。
+        当需要显式修正 current_user_message_id 时可调用。
         """
         # 先尝试按 chat_id 找 client_fp（遍历 fp_index）
         # 简化：若调用方已知 client_fp 则直接操作
@@ -281,6 +314,9 @@ class SessionManager:
         if not chat_ids:
             return None
 
+        # 待确认会话精确匹配时惰性计算
+        pending_fps: Optional[List[str]] = None
+
         # 从最新的会话开始倒序匹配
         for chat_id in reversed(chat_ids):
             session = await self._store.get(_session_key(client_fp, chat_id))
@@ -289,6 +325,17 @@ class SessionManager:
                 await self._remove_from_fp_index(client_fp, chat_id)
                 continue
             cached_fps: List[str] = session.get("fingerprints", [])
+
+            # 待确认会话（precreate 成功但 completions 未确认）：
+            # is_continuous_session 对首轮消息（≤2 条）返回 False，
+            # 因此改用精确指纹比对来匹配同一请求的重试。
+            if not session.get("last_message_id"):
+                if pending_fps is None:
+                    pending_fps = self._fp.collect_fingerprints(messages)
+                if pending_fps == cached_fps:
+                    return session
+                continue
+
             if self._fp.is_continuous_session(messages, cached_fps):
                 return session
 
