@@ -45,6 +45,13 @@ from app.core.retry_policy import (
 from app.core.response_handler import ResponseHandler
 from app.core.toolify import ToolifyRequestHandler
 from app.core.session import SessionManager, SessionResult
+from app.core.session.session_content import (
+    build_session_body_messages,
+    extract_turn_content,
+    get_precreate_content,
+    inject_system_prompt,
+    resolve_trigger_signal,
+)
 from app.core.file_upload import upload_file as _upload_file
 from app.core.openai_compat import (
     get_error_message,
@@ -62,6 +69,7 @@ logger = get_logger()
 def generate_uuid() -> str:
     """生成UUID v4"""
     return str(uuid.uuid4())
+
 
 
 # --------------------------------------------------------------------------
@@ -690,6 +698,11 @@ class UpstreamClient:
         try:
             # 提取最后一条用户消息（用于签名和会话预创建，两种模式均需要）
             last_user_text = extract_last_user_text(raw_messages)
+            session_turn_content = extract_turn_content(
+                raw_messages=raw_messages,
+                normalized_messages=normalized_messages,
+                fallback_user_text=last_user_text,
+            )
 
             # 解析模型特性（两种模式均需要，precreate 路径也依赖 features）
             features = self._model_manager.resolve_model_features(request)
@@ -714,21 +727,38 @@ class UpstreamClient:
                     message_id = session_result.message_id
                     user_msg_id = generate_uuid()
                     parent_id = session_result.parent_id
+                    if tools:
+                        trigger_signal = resolve_trigger_signal(
+                            session_result, trigger_signal, self.logger,
+                        )
                     self.logger.debug(
                         "♻️ 复用会话 chat_id={}, parent_id={}",
                         chat_id[:8],
                         parent_id[:8] if parent_id else "None",
                     )
+                    session_body_messages = build_session_body_messages(
+                        normalized_messages=normalized_messages,
+                        session_turn_content=session_turn_content,
+                        is_new_session=False,
+                        inject_system=settings.SESSION_SYSTEM_INJECT,
+                    )
                 else:
                     # New session: precreate chat on upstream
                     message_id = generate_uuid()
                     user_msg_id = generate_uuid()
+                    session_body_messages = build_session_body_messages(
+                        normalized_messages=normalized_messages,
+                        session_turn_content=session_turn_content,
+                        is_new_session=True,
+                        inject_system=settings.SESSION_SYSTEM_INJECT,
+                    )
+                    precreate_content = get_precreate_content(session_body_messages)
                     chat_id = await self._precreate_chat(
                         token=token,
                         fe_version=fe_version,
                         model=features["upstream_model_id"],
                         user_msg_id=user_msg_id,
-                        content=last_user_text,
+                        content=precreate_content,
                         enable_thinking=features["enable_thinking"],
                         auto_web_search=features["auto_web_search"],
                         mcp_servers=features.get("mcp_servers", []),
@@ -741,19 +771,10 @@ class UpstreamClient:
                         messages=raw_messages,
                         chat_id=chat_id,
                         message_id=message_id,
+                        trigger_signal=trigger_signal if tools else "",
                     )
-            else:
-                # Direct mode: random UUID, no session management
-                chat_id = generate_uuid()
-                message_id = generate_uuid()
-                user_msg_id = generate_uuid()
-                parent_id = None
 
-            # 处理多模态消息（图片上传）
-            if settings.SESSION_ENABLED:
-                # Session mode: only send the latest user message.
-                # The upstream maintains full history server-side.
-                session_body_messages = [{"role": "user", "content": last_user_text}]
+                # Session mode: send prepared messages
                 messages, files = await process_multimodal_messages(
                     normalized_messages=session_body_messages,
                     token=token,
@@ -764,9 +785,18 @@ class UpstreamClient:
                     base_url=self.base_url,
                 )
             else:
-                # Direct mode: process all messages (full history)
+                # Direct mode: random UUID, no session management
+                chat_id = generate_uuid()
+                message_id = generate_uuid()
+                user_msg_id = generate_uuid()
+                parent_id = None
+                direct_messages = (
+                    inject_system_prompt(normalized_messages)
+                    if settings.SESSION_SYSTEM_INJECT
+                    else normalized_messages
+                )
                 messages, files = await process_multimodal_messages(
-                    normalized_messages=normalized_messages,
+                    normalized_messages=direct_messages,
                     token=token,
                     user_id=user_id,
                     chat_id=chat_id,

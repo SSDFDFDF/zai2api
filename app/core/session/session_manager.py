@@ -51,6 +51,9 @@ class SessionResult:
     bound_token: Optional[str] = None
     """复用会话时绑定的原始 token，新对话时为 None。"""
 
+    trigger_signal: Optional[str] = None
+    """该会话绑定的 Toolify XML 触发信号。"""
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # 存储键辅助
@@ -149,6 +152,7 @@ class SessionManager:
             parent_id=parent_id,
             is_new=False,
             bound_token=session.get("auth_token"),
+            trigger_signal=session.get("trigger_signal"),
         )
 
     async def create_session(
@@ -158,6 +162,7 @@ class SessionManager:
         messages: List[Dict[str, Any]],
         chat_id: str,
         message_id: str,
+        trigger_signal: Optional[str] = None,
         client_id: Optional[str] = None,
     ) -> SessionResult:
         """Create a new session with an externally-provided chat_id (from upstream).
@@ -172,6 +177,7 @@ class SessionManager:
             messages: Full message list (OpenAI format) for fingerprint collection.
             chat_id: Chat ID returned by the upstream pre-create endpoint.
             message_id: UUID generated for this turn's message.
+            trigger_signal: Toolify XML trigger signal for this chat session.
             client_id: Optional explicit client ID (used for index key if provided).
 
         Returns:
@@ -191,6 +197,7 @@ class SessionManager:
             "model": model,
             "token_hash": self._fp.hash_token(auth_token),
             "auth_token": auth_token,
+            "trigger_signal": trigger_signal or "",
             "created_at": time.time(),
             "last_update": time.time(),
         }
@@ -203,6 +210,7 @@ class SessionManager:
             message_id=message_id,
             parent_id=None,
             is_new=True,
+            trigger_signal=trigger_signal,
         )
 
     async def update_session_message_id(

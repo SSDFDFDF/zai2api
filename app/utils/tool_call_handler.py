@@ -25,6 +25,8 @@ from app.utils.logger import get_logger
 
 logger = get_logger()
 
+_FALLBACK_TRIGGER_RE = re.compile(r"<Function_[A-Za-z0-9]{4}_Start/>")
+
 
 # ---------------------------------------------------------------------------
 # 触发信号生成
@@ -1037,9 +1039,29 @@ class StreamingFunctionCallDetector:
                 i += skip_chars
                 continue
 
-            if not self.in_think_block and self._can_detect_signal_at(i):
-                if self.content_buffer[i:i+self.signal_len] == self.signal:
-                    logger.debug(f"🔧 检测到触发信号 (非 think 块内), 切换到工具解析模式")
+            if not self.in_think_block:
+                # 主路径：严格匹配当前会话信号
+                if self._can_detect_signal_at(i):
+                    if self.content_buffer[i:i+self.signal_len] == self.signal:
+                        logger.debug("🔧 检测到触发信号 (非 think 块内), 切换到工具解析模式")
+                        self.state = "tool_parsing"
+                        self.content_buffer = self.content_buffer[i:]
+                        return True, content_to_yield
+
+                # 兜底：会话信号漂移时，允许匹配标准 Function 触发器格式
+                fallback = _FALLBACK_TRIGGER_RE.match(self.content_buffer, i)
+                if fallback:
+                    detected_signal = fallback.group(0)
+                    if detected_signal != self.signal:
+                        logger.warning(
+                            "⚠️ 检测到 trigger_signal 漂移, 使用流内信号: {} -> {}",
+                            self.signal,
+                            detected_signal,
+                        )
+                        self.trigger_signal = detected_signal
+                        self.signal = detected_signal
+                        self.signal_len = len(detected_signal)
+                    logger.debug("🔧 检测到触发信号(兜底匹配), 切换到工具解析模式")
                     self.state = "tool_parsing"
                     self.content_buffer = self.content_buffer[i:]
                     return True, content_to_yield

@@ -10,6 +10,7 @@
 """
 
 import json
+import re
 import uuid
 from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple
 
@@ -24,6 +25,7 @@ from app.utils.tool_call_handler import (
 )
 
 logger = get_logger()
+_FUNCTION_TRIGGER_RE = re.compile(r"<Function_[A-Za-z0-9]{4}_Start/>")
 
 
 class ToolifyContext(Protocol):
@@ -82,6 +84,15 @@ class ToolifyHandler:
         is_detected, content_to_yield = detector.process_chunk(current_text)
 
         if is_detected:
+            detector_signal = str(getattr(detector, "trigger_signal", "") or "")
+            ctx_signal = str(getattr(ctx, "trigger_signal", "") or "")
+            if detector_signal and detector_signal != ctx_signal:
+                logger.warning(
+                    "⚠️ 流式检测到 trigger_signal 漂移, 使用流内信号: {} -> {}",
+                    ctx_signal,
+                    detector_signal,
+                )
+                setattr(ctx, "trigger_signal", detector_signal)
             logger.debug("🔧 流式检测器触发工具调用信号, 切换到解析模式")
             output: List[str] = []
             if content_to_yield and self.emit_func:
@@ -110,9 +121,11 @@ class ToolifyHandler:
             return []
 
         logger.debug("🔧 检测到完整的 </function_calls>, 开始解析...")
-        parsed = parse_function_calls_xml(
-            detector.content_buffer, getattr(ctx, "trigger_signal", "")
+        active_trigger = (
+            str(getattr(detector, "trigger_signal", "") or "")
+            or str(getattr(ctx, "trigger_signal", "") or "")
         )
+        parsed = parse_function_calls_xml(detector.content_buffer, active_trigger)
         if not parsed:
             logger.warning("⚠️ 检测到 </function_calls> 但 XML 解析失败, 继续缓冲")
             return []
@@ -148,11 +161,24 @@ class ToolifyHandler:
         """流结束时从累积内容中提取工具调用 (XML 优先, JSON 降级)。"""
         output: List[str] = []
         buffered_content = getattr(ctx, "buffered_content", "")
-        trigger_signal = getattr(ctx, "trigger_signal", "")
+        trigger_signal = str(getattr(ctx, "trigger_signal", "") or "")
         tools_defs = getattr(ctx, "tools_defs", None)
+        active_trigger = trigger_signal
 
-        if trigger_signal and trigger_signal in buffered_content:
-            parsed = parse_function_calls_xml(buffered_content, trigger_signal)
+        if not active_trigger or active_trigger not in buffered_content:
+            matches = _FUNCTION_TRIGGER_RE.findall(buffered_content or "")
+            if matches:
+                active_trigger = matches[-1]
+                if active_trigger != trigger_signal:
+                    logger.warning(
+                        "⚠️ 流结束回收阶段触发器漂移, 使用缓冲区信号: {} -> {}",
+                        trigger_signal,
+                        active_trigger,
+                    )
+                    setattr(ctx, "trigger_signal", active_trigger)
+
+        if active_trigger and active_trigger in buffered_content:
+            parsed = parse_function_calls_xml(buffered_content, active_trigger)
             if parsed:
                 validation_err = validate_parsed_tools(parsed, tools_defs)
                 if validation_err:
@@ -221,16 +247,22 @@ class ToolifyHandler:
         """从非流式聚合文本中提取工具调用。"""
         tool_calls_accum: List[Dict[str, Any]] = []
         cleaned_content = final_content
+        active_trigger = str(trigger_signal or "")
 
-        if trigger_signal and trigger_signal in cleaned_content:
-            parsed = parse_function_calls_xml(cleaned_content, trigger_signal)
+        if not active_trigger or active_trigger not in cleaned_content:
+            matches = _FUNCTION_TRIGGER_RE.findall(cleaned_content or "")
+            if matches:
+                active_trigger = matches[-1]
+
+        if active_trigger and active_trigger in cleaned_content:
+            parsed = parse_function_calls_xml(cleaned_content, active_trigger)
             if parsed:
                 validation_err = validate_parsed_tools(parsed, tools_defs)
                 if not validation_err:
                     normalized = self._normalize_xml_tools(parsed)
                     if normalized:
                         tool_calls_accum = normalized
-                        trigger_pos = cleaned_content.find(trigger_signal)
+                        trigger_pos = cleaned_content.find(active_trigger)
                         if trigger_pos >= 0:
                             cleaned_content = cleaned_content[:trigger_pos].strip()
                         logger.info(

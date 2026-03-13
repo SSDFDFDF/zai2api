@@ -114,6 +114,13 @@ CONFIG_SECTIONS: tuple[ConfigSectionSpec, ...] = (
                 value_type="bool",
                 default_value=False,
             ),
+            ConfigFieldSpec(
+                key="SESSION_SYSTEM_INJECT",
+                label="System 注入模式",
+                description="开启时将系统提示词注入到用户消息中（适用于链式会话和独立会话），关闭时作为独立 system 消息透传。",
+                value_type="bool",
+                default_value=True,
+            ),
         ),
     ),
     ConfigSectionSpec(
