@@ -246,13 +246,21 @@ async def write_request_log(
 
 
 def _openai_payload_has_output(payload: Dict[str, Any]) -> bool:
+    """Check whether an OpenAI SSE payload contains real output.
+
+    Note: a lone ``role`` field is NOT treated as first-token output
+    because the initial chunk typically only carries
+    ``{"role": "assistant"}`` with no visible content for the user.
+    Only content / reasoning_content / tool_calls qualify.
+    """
     choice = ((payload.get("choices") or [{}])[0]) if isinstance(payload, dict) else {}
     delta = choice.get("delta") or {}
-    return bool(
-        delta.get("content")
-        or delta.get("reasoning_content")
-        or delta.get("tool_calls")
-    )
+
+    if delta.get("content") or delta.get("reasoning_content"):
+        return True
+    if delta.get("tool_calls"):
+        return True
+    return False
 
 
 async def wrap_openai_stream_with_logging(
@@ -268,6 +276,7 @@ async def wrap_openai_stream_with_logging(
     status_code = 200
     error_message: Optional[str] = None
     first_token_time = 0.0
+    stream_start_time: Optional[float] = None
     usage = {
         "input_tokens": 0,
         "output_tokens": 0,
@@ -278,6 +287,9 @@ async def wrap_openai_stream_with_logging(
 
     try:
         async for chunk in stream:
+            if stream_start_time is None:
+                stream_start_time = time.perf_counter()
+
             if chunk.startswith("data: "):
                 payload_text = chunk[6:].strip()
                 if payload_text and payload_text != "[DONE]":
@@ -349,6 +361,7 @@ async def wrap_claude_stream_with_logging(
     status_code = 200
     error_message: Optional[str] = None
     first_token_time = 0.0
+    stream_start_time: Optional[float] = None
     usage = {
         "input_tokens": input_tokens,
         "output_tokens": 0,
@@ -360,6 +373,9 @@ async def wrap_claude_stream_with_logging(
 
     try:
         async for chunk in stream:
+            if stream_start_time is None:
+                stream_start_time = time.perf_counter()
+
             # chunk might contain multiple lines (e.g. "event: ...\ndata: ...\n\n")
             lines = chunk.strip().split("\n")
             payload_text = None
@@ -377,6 +393,7 @@ async def wrap_claude_stream_with_logging(
                     payload = None
 
                 if isinstance(payload, dict):
+                    # 只有收到 content_block_delta，才代表上游真正开始返回有效内容
                     if current_event == "content_block_delta" and not first_token_time:
                         first_token_time = max(0.0, time.perf_counter() - started_at)
                     if payload.get("usage"):

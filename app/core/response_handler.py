@@ -3,9 +3,7 @@
 
 """流式和非流式响应处理模块。
 
-将原 UpstreamClient._handle_stream_response()、_handle_non_stream_response()
-及辅助方法提取为 ResponseHandler 类。
-所有参数和行为与原实现完全一致。
+将上游响应处理统一收敛到 ResponseHandler。
 """
 
 import json
@@ -25,17 +23,16 @@ from app.core.openai_compat import (
     handle_error,
 )
 from app.core.response_handler_glm import GLMToolHandler
-from app.core.response_handler_toolify import ToolifyHandler
+from app.core.toolify import ToolifyHandler
 from app.models.schemas import OpenAIRequest
 from app.utils.logger import get_logger
 from app.utils.tool_call_handler import (
     StreamingFunctionCallDetector,
-    parse_and_extract_tool_calls,
-    parse_function_calls_xml,
-    validate_parsed_tools,
 )
 
 logger = get_logger()
+
+_CITATION_MARKER_RE = re.compile(r"^【turn\d+(?:search|click)\d+】$")
 
 
 # ------------------------------------------------------------------
@@ -124,7 +121,7 @@ class StreamContext:
         self.downstream_count += 1
         logger.debug(
             f"\U0001f4e4 Client SSE #{self.downstream_count}: "
-            f"{sse_data.rstrip()[:200]}"
+            f"{sse_data.rstrip()}"
         )
 
     def process_citation_marker(self, text: str) -> str:
@@ -136,34 +133,31 @@ class StreamContext:
         if not text and not self.citation_buf:
             return text
 
-        res = ""
+        res_parts: List[str] = []
         for char in text:
             if not self.citation_buf:
                 if char == "【":
                     self.citation_buf = char
                 else:
-                    res += char
+                    res_parts.append(char)
             else:
                 self.citation_buf += char
                 if self.citation_buf.endswith("】"):
-                    if re.match(
-                        r"^【turn\d+(?:search|click)\d+】$",
-                        self.citation_buf,
-                    ):
+                    if _CITATION_MARKER_RE.match(self.citation_buf):
                         self.citation_buf = ""  # 完整引用标记，丢弃
                     else:
-                        res += self.citation_buf
+                        res_parts.append(self.citation_buf)
                         self.citation_buf = ""
                 elif len(self.citation_buf) > 30:
-                    res += self.citation_buf  # 超长，退还
+                    res_parts.append(self.citation_buf)  # 超长，退还
                     self.citation_buf = ""
                 elif (
                     not "【turn".startswith(self.citation_buf)
                     and not self.citation_buf.startswith("【turn")
                 ):
-                    res += self.citation_buf  # 偏离特征，退还
+                    res_parts.append(self.citation_buf)  # 偏离特征，退还
                     self.citation_buf = ""
-        return res
+        return "".join(res_parts)
 
 
 class ResponseHandler:
@@ -181,7 +175,8 @@ class ResponseHandler:
         )
         self.toolify_handler = ToolifyHandler(
             emit_func=self._emit_sse,
-            build_tc_func=self._build_tool_call_chunks
+            ensure_role_func=self._ensure_role_sse,
+            normalize_tool_calls_func=self.normalize_tool_calls,
         )
 
     # ==================================================================
@@ -203,10 +198,33 @@ class ResponseHandler:
 
     # 所有可能包裹思维内容的 XML 标签名（通用化，新增标签只需在此添加）
     _THINKING_TAGS = ("details", "think", "reasoning", "thought")
+    _THINKING_TAGS_ALT = "|".join(_THINKING_TAGS)
     # 预编译的关闭标签正则：匹配 </details> 或 </think> 等
     _THINKING_CLOSE_RE = re.compile(
         r"</" + "|".join(f"(?:{t})" for t in _THINKING_TAGS) + r">"
     )
+    _THINKING_BLOCK_RE = re.compile(
+        rf"<(?:{_THINKING_TAGS_ALT})[^>]*>.*?</(?:{_THINKING_TAGS_ALT})>\s*",
+        flags=re.DOTALL,
+    )
+    _THINKING_ORPHAN_CLOSE_RE = re.compile(
+        rf'^[^<]*?(?:true|false)?"?>\s*(?:>\s*.*?)?</(?:{_THINKING_TAGS_ALT})>\s*',
+        flags=re.DOTALL,
+    )
+    _THINKING_ORPHAN_OPEN_RE = re.compile(
+        rf"<(?:{_THINKING_TAGS_ALT})[^>]*>.*$",
+        flags=re.DOTALL,
+    )
+    _GLM_BLOCK_FULL_RE = re.compile(
+        r"<glm_block[^>]*>.*?</glm_block>",
+        flags=re.DOTALL,
+    )
+    _GLM_BLOCK_TAIL_RE = re.compile(
+        r"<glm_block[^>]*>.*",
+        flags=re.DOTALL,
+    )
+    _CITATION_FULL_RE = re.compile(r"【turn\d+(?:search|click)\d+】")
+    _CITATION_TAIL_RE = re.compile(r"【turn\d*(?:search|click)?\d*$")
 
     @classmethod
     def strip_thinking_residue(cls, text: str) -> Tuple[str, bool]:
@@ -222,29 +240,16 @@ class ResponseHandler:
         if not text:
             return "", False
 
-        tags_alt = "|".join(cls._THINKING_TAGS)
         is_unclosed = False
 
         # 1. Strip complete <tag ...>...</tag> blocks
-        cleaned = re.sub(
-            rf"<(?:{tags_alt})[^>]*>.*?</(?:{tags_alt})>\s*",
-            "",
-            text,
-            flags=re.DOTALL,
-        )
+        cleaned = cls._THINKING_BLOCK_RE.sub("", text)
 
         # 2. Strip orphan closing fragment (tail of a tag opened in thinking)
-        cleaned = re.sub(
-            rf'^[^<]*?(?:true|false)?"?>\s*(?:>\s*.*?)?</(?:{tags_alt})>\s*',
-            "",
-            cleaned,
-            flags=re.DOTALL,
-        )
+        cleaned = cls._THINKING_ORPHAN_CLOSE_RE.sub("", cleaned)
 
         # 3. Strip orphan opening without closing
-        m_open = re.search(
-            rf"<(?:{tags_alt})[^>]*>.*$", cleaned, flags=re.DOTALL
-        )
+        m_open = cls._THINKING_ORPHAN_OPEN_RE.search(cleaned)
         if m_open:
             is_unclosed = True
             cleaned = cleaned[: m_open.start()]
@@ -364,40 +369,6 @@ class ResponseHandler:
 
         return "\n\n---\n" + "\n".join(citations)
 
-    # ==================================================================
-    # 流式处理: SSE 构建辅助
-    # ==================================================================
-
-    def _build_tool_call_chunks(
-        self,
-        ctx: StreamContext,
-        parsed_tools: List[Dict[str, Any]],
-    ) -> List[str]:
-        """将 XML 解析结果转换为 OpenAI tool_calls SSE chunks。"""
-        chunks: List[str] = []
-        sid = ctx.ensure_stream_id()
-
-        for i, tool in enumerate(parsed_tools):
-            tc = {
-                "index": i,
-                "id": f"call_{uuid.uuid4().hex[:24]}",
-                "type": "function",
-                "function": {
-                    "name": tool["name"],
-                    "arguments": json.dumps(
-                        tool["args"], ensure_ascii=False
-                    ),
-                },
-            }
-            chunks.append(
-                format_sse_chunk(
-                    create_openai_chunk(
-                        sid, ctx.model, {"tool_calls": [tc]}
-                    )
-                )
-            )
-        return chunks
-
     def _emit_sse(
         self,
         ctx: StreamContext,
@@ -406,16 +377,8 @@ class ResponseHandler:
         """构建 SSE chunk 并返回待 yield 的列表 (含可能的 role chunk)。"""
         output: List[str] = []
 
-        if not ctx.has_sent_role:
-            ctx.has_sent_role = True
-            role_sse = format_sse_chunk(
-                create_openai_chunk(
-                    ctx.ensure_stream_id(),
-                    ctx.model,
-                    {"role": "assistant"},
-                )
-            )
-            ctx.log_downstream(role_sse)
+        role_sse = self._ensure_role_sse(ctx)
+        if role_sse:
             output.append(role_sse)
 
         sse = format_sse_chunk(
@@ -425,47 +388,100 @@ class ResponseHandler:
         output.append(sse)
         return output
 
+    def _ensure_role_sse(self, ctx: StreamContext) -> Optional[str]:
+        """确保已发送 role=assistant，返回新增的 role chunk。"""
+        if ctx.has_sent_role:
+            return None
+        ctx.has_sent_role = True
+        role_sse = format_sse_chunk(
+            create_openai_chunk(
+                ctx.ensure_stream_id(),
+                ctx.model,
+                {"role": "assistant"},
+            )
+        )
+        ctx.log_downstream(role_sse)
+        return role_sse
+
+    @staticmethod
+    def _extract_sse_data_payload(line: str) -> Tuple[str, str]:
+        """从原始 SSE 行提取 data payload。
+
+        Returns:
+            (state, payload)
+            - state in {"data", "done", "non_data", "skip"}
+        """
+        if not line:
+            return "skip", ""
+
+        if line.startswith("data:"):
+            payload = line[5:].strip()
+        else:
+            stripped = line.strip()
+            if not stripped:
+                return "skip", ""
+            if not stripped.startswith("data:"):
+                return "non_data", stripped
+            payload = stripped[5:].strip()
+
+        if not payload:
+            return "skip", ""
+        if payload == "[DONE]" or payload.casefold() == "done":
+            return "done", ""
+        return "data", payload
+
     # ==================================================================
     # 流式处理: SSE 行解析
     # ==================================================================
 
     def _parse_sse_line(
         self, line: str, ctx: StreamContext
-    ) -> Optional[Tuple[Dict[str, Any], Dict[str, Any]]]:
+    ) -> Tuple[str, Optional[Tuple[Dict[str, Any], Dict[str, Any]]]]:
         """解析一行 SSE 数据。
 
         Returns:
-            (chunk, data) 二元组，如果行应被跳过则返回 None。
+            (state, parsed)：
+            - state = "done" 时表示命中 [DONE]
+            - state = "skip" 时表示应跳过当前行
+            - state = "ok" 且 parsed 非空时返回 (chunk, data)
         """
+        if not line.strip():
+            return "skip", None
+
         ctx.line_count += 1
-        if not line:
-            return None
+        self.logger.debug(
+            "🔍 SSE line #{}: {}",
+            ctx.line_count,
+            line,
+        )
 
-        self.logger.debug(f"🔍 SSE line #{ctx.line_count}: {line[:200]}")
-
-        current_line = line.strip()
-        if not current_line.startswith("data:"):
+        state, chunk_str = self._extract_sse_data_payload(line)
+        if state == "done":
+            return "done", None
+        if state == "non_data":
             if ctx.line_count <= 3:
                 self.logger.debug(
-                    f"🔍 SSE line #{ctx.line_count} 跳过 (non-data): "
-                    f"{current_line[:100]}"
+                    "🔍 SSE line #{} 跳过 (non-data): {}",
+                    ctx.line_count,
+                    chunk_str,
                 )
-            return None
-
-        chunk_str = current_line[5:].strip()
-        if not chunk_str:
-            return None
-
-        if chunk_str == "[DONE]":
-            return None  # 调用方通过检查 chunk_str 处理 DONE
+            return "skip", None
+        if state != "data":
+            return "skip", None
 
         try:
             chunk = json.loads(chunk_str)
         except json.JSONDecodeError as error:
+            # 出错时才记录开销较大的日志
             self.logger.debug(
-                f"❌ JSON解析错误: {error}, 内容: {chunk_str[:1000]}"
+                "❌ JSON解析错误: {}, 内容: {}",
+                error,
+                chunk_str,
             )
-            return None
+            return "skip", None
+            
+        if not isinstance(chunk, dict):
+            return "skip", None
 
         chunk_type = chunk.get("type")
         data = (
@@ -474,16 +490,9 @@ class ResponseHandler:
             else chunk
         )
         if not isinstance(data, dict):
-            return None
+            return "skip", None
 
-        return chunk, data
-
-    def _is_sse_done(self, line: str) -> bool:
-        """检查 SSE 行是否为 [DONE] 信号。"""
-        stripped = line.strip()
-        if stripped.startswith("data:"):
-            return stripped[5:].strip() == "[DONE]"
-        return False
+        return "ok", (chunk, data)
 
     # ==================================================================
     # 流式处理: 状态更新
@@ -501,9 +510,7 @@ class ResponseHandler:
         phase = data.get("phase")
         if phase and phase != ctx.last_phase:
             prev = ctx.last_phase
-            self.logger.debug(
-                f"📈 SSE 阶段: {prev} → {phase}"
-            )
+            self.logger.debug("📈 SSE 阶段: {} → {}", prev, phase)
             ctx.last_phase = phase
 
             # 追踪 GLM 内部 MCP 工具执行上下文
@@ -517,19 +524,22 @@ class ResponseHandler:
             elif phase in ("answer", "thinking"):
                 if ctx.in_glm_tool_execution:
                     self.logger.debug(
-                        f"[glm-tool] 工具执行完毕, 恢复正常输出 (-> {phase})"
+                        "[glm-tool] 工具执行完毕, 恢复正常输出 (-> {})",
+                        phase,
                     )
                 ctx.in_glm_tool_execution = False
 
         # Usage
-        if data.get("usage"):
-            ctx.usage_info = data["usage"]
-            self.logger.info(f"[usage] catch data.usage: {ctx.usage_info}")
-        elif chunk.get("usage"):
-            ctx.usage_info = chunk["usage"]
-            self.logger.info(
-                f"[usage] catch chunk.usage: {ctx.usage_info}"
-            )
+        data_usage = data.get("usage")
+        if data_usage and data_usage != ctx.usage_info:
+            ctx.usage_info = data_usage
+            self.logger.debug("[usage] catch data.usage: {}", ctx.usage_info)
+            return
+
+        chunk_usage = chunk.get("usage")
+        if chunk_usage and chunk_usage != ctx.usage_info:
+            ctx.usage_info = chunk_usage
+            self.logger.debug("[usage] catch chunk.usage: {}", ctx.usage_info)
 
     # ==================================================================
     # 流式处理: 内容累积
@@ -559,9 +569,10 @@ class ResponseHandler:
                 )
                 if safe_idx != edit_index:
                     self.logger.debug(
-                        f"🔧 edit_index {edit_index} 越界 "
-                        f"(buffered={len(ctx.buffered_content)}), "
-                        f"截断为 {safe_idx}"
+                        "🔧 edit_index {} 越界 (buffered={}), 截断为 {}",
+                        edit_index,
+                        len(ctx.buffered_content),
+                        safe_idx,
                     )
                 ctx.buffered_content = (
                     ctx.buffered_content[:safe_idx]
@@ -569,9 +580,11 @@ class ResponseHandler:
                     + ctx.buffered_content[safe_idx:]
                 )
                 self.logger.debug(
-                    f"🔧 edit_index={edit_index}: 在位置 {safe_idx} 插入 "
-                    f"{len(edit_content)} 字符, "
-                    f"buffered 总长={len(ctx.buffered_content)}"
+                    "🔧 edit_index={}: 在位置 {} 插入 {} 字符, buffered 总长={}",
+                    edit_index,
+                    safe_idx,
+                    len(edit_content),
+                    len(ctx.buffered_content),
                 )
             else:
                 ctx.buffered_content += edit_content
@@ -596,9 +609,19 @@ class ResponseHandler:
 
         error_code_val = sse_error.get("code", "UNKNOWN")
         error_detail = sse_error.get("detail", "Unknown upstream error")
+
+        if data.get("done") is True:
+            self.logger.warning(
+                "⚠️ 上游 SSE 在 done 状态返回错误 (容忍忽略): code={}, detail={}",
+                error_code_val,
+                error_detail,
+            )
+            return None
+
         self.logger.error(
-            f"❌ 上游 SSE 返回错误: code={error_code_val}, "
-            f"detail={error_detail}"
+            "❌ 上游 SSE 返回错误: code={}, detail={}",
+            error_code_val,
+            error_detail,
         )
         error_response = {
             "error": {
@@ -609,16 +632,8 @@ class ResponseHandler:
         }
 
         output: List[str] = []
-        if not ctx.has_sent_role:
-            ctx.has_sent_role = True
-            role_sse = format_sse_chunk(
-                create_openai_chunk(
-                    ctx.ensure_stream_id(),
-                    ctx.model,
-                    {"role": "assistant"},
-                )
-            )
-            ctx.log_downstream(role_sse)
+        role_sse = self._ensure_role_sse(ctx)
+        if role_sse:
             output.append(role_sse)
 
         output.append(f"data: {json.dumps(error_response)}\n\n")
@@ -714,11 +729,13 @@ class ResponseHandler:
             m = self._THINKING_CLOSE_RE.search(ctx.details_drain_buf)
             if m:
                 remainder = ctx.details_drain_buf[m.end() :].lstrip()
-                self.logger.debug(
-                    f"🧹 排掉思维残留完成, 剩余内容: {remainder[:80]}..."
-                    if remainder
-                    else "🧹 排掉思维残留完成, 无剩余内容"
-                )
+                if remainder:
+                    self.logger.debug(
+                        "🧹 排掉思维残留完成, 剩余内容: {}...",
+                        remainder[:80],
+                    )
+                else:
+                    self.logger.debug("🧹 排掉思维残留完成, 无剩余内容")
                 ctx.draining_details = False
                 ctx.details_drain_buf = ""
                 if not remainder:
@@ -734,50 +751,29 @@ class ResponseHandler:
                 ctx.draining_details = True
                 ctx.details_drain_buf = current_text
                 self.logger.debug(
-                    f"🧹 检测到未闭合思维标签残留, "
-                    f"开始排掉: {current_text[:80]}..."
+                    "🧹 检测到未闭合思维标签残留, 开始排掉: {}...",
+                    current_text[:80],
                 )
 
             if not cleaned:
                 return ""
             elif cleaned != current_text:
                 self.logger.debug(
-                    f"🧹 一次性清理思维残留: "
-                    f"{len(current_text)}→{len(cleaned)} 字符"
+                    "🧹 一次性清理思维残留: {}→{} 字符",
+                    len(current_text),
+                    len(cleaned),
                 )
                 current_text = cleaned
 
         # GLM <glm_block> 过滤
         if current_text and "<glm_block" in current_text:
             self.logger.debug(
-                f"🧹 过滤 GLM 内部工具调用块: {current_text[:80]}..."
+                "🧹 过滤 GLM 内部工具调用块: {}...",
+                current_text[:80],
             )
             return ""
 
         return current_text
-
-    # ==================================================================
-    # 流式处理: Toolify 工具解析完毕回调辅助
-    # ==================================================================
-
-    def _inject_toolify_role_and_chunks(
-        self, ctx: StreamContext, parsed_chunks: List[str]
-    ) -> List[str]:
-        """为 Toolify 解析出来的 tool_calls 增补 role=assistant (如果尚未发)。"""
-        output = []
-        if not ctx.has_sent_role and parsed_chunks:
-            ctx.has_sent_role = True
-            role_sse = format_sse_chunk(
-                create_openai_chunk(
-                    ctx.ensure_stream_id(),
-                    ctx.model,
-                    {"role": "assistant"},
-                )
-            )
-            ctx.log_downstream(role_sse)
-            output.append(role_sse)
-        output.extend(parsed_chunks)
-        return output
 
     # ==================================================================
     # 流式处理: 阶段内容输出
@@ -837,27 +833,17 @@ class ResponseHandler:
 
         # 最后尝试: 从累积内容中提取工具调用
         if ctx.has_tools and not ctx.tool_calls_accum:
-            for sse in self._finalize_tool_extraction(ctx):
+            for sse in self.toolify_handler.finalize_stream_tool_calls(ctx):
                 yield sse
 
         # 确保 role 已发送
-        if not ctx.has_sent_role:
-            ctx.has_sent_role = True
-            role_sse = format_sse_chunk(
-                create_openai_chunk(
-                    ctx.ensure_stream_id(),
-                    ctx.model,
-                    {"role": "assistant"},
-                )
-            )
-            ctx.log_downstream(role_sse)
+        role_sse = self._ensure_role_sse(ctx)
+        if role_sse:
             yield role_sse
 
         # 刷出残留的引用标记缓冲
         if ctx.citation_buf:
-            if not re.match(
-                r"^【turn\d*(?:search|click)?\d*$", ctx.citation_buf
-            ):
+            if not self._CITATION_TAIL_RE.match(ctx.citation_buf):
                 sse = format_sse_chunk(
                     create_openai_chunk(
                         ctx.ensure_stream_id(),
@@ -877,8 +863,9 @@ class ResponseHandler:
             remaining = ctx.detector.flush()
             if remaining:
                 self.logger.debug(
-                    f"🧹 刷出 detector 残留缓冲: "
-                    f"{len(remaining)} 字符: {remaining[:80]}"
+                    "🧹 刷出 detector 残留缓冲: {} 字符: {}",
+                    len(remaining),
+                    remaining[:80],
                 )
                 sse = format_sse_chunk(
                     create_openai_chunk(
@@ -902,107 +889,6 @@ class ResponseHandler:
         ctx.log_downstream("data: [DONE]")
         yield "data: [DONE]\n\n"
         ctx.finished = True
-
-    def _finalize_tool_extraction(
-        self, ctx: StreamContext
-    ) -> List[str]:
-        """流结束时从累积内容中提取工具调用 (XML 优先, JSON 降级)。"""
-        output: List[str] = []
-
-        # 优先尝试 XML 解析
-        if ctx.trigger_signal and ctx.trigger_signal in ctx.buffered_content:
-            parsed = parse_function_calls_xml(
-                ctx.buffered_content, ctx.trigger_signal
-            )
-            if parsed:
-                validation_err = validate_parsed_tools(
-                    parsed, ctx.tools_defs
-                )
-                if validation_err:
-                    self.logger.warning(
-                        f"⚠️ 流结束时 Schema 验证失败: {validation_err}"
-                    )
-                    # 智能降级: 只要有 name + 非空 args 就视为可用
-                    usable = [
-                        p
-                        for p in parsed
-                        if p.get("name")
-                        and isinstance(p.get("args"), dict)
-                        and p["args"]
-                    ]
-                    if usable:
-                        self.logger.warning(
-                            f"⚠️ Schema 验证失败但参数非空, "
-                            f"强制发送 {len(usable)} 个工具调用"
-                        )
-                        tc_chunks = self._build_tool_call_chunks(ctx, usable)
-                        output.extend(
-                            self._emit_sse(
-                                ctx, {"role": "assistant"}
-                            )[:1]
-                            if not ctx.has_sent_role
-                            else []
-                        )
-                        # 确保 role 已发送
-                        if not ctx.has_sent_role:
-                            ctx.has_sent_role = True
-                            role_sse = format_sse_chunk(
-                                create_openai_chunk(
-                                    ctx.ensure_stream_id(),
-                                    ctx.model,
-                                    {"role": "assistant"},
-                                )
-                            )
-                            ctx.log_downstream(role_sse)
-                            output.append(role_sse)
-                        output.extend(tc_chunks)
-                        ctx.tool_calls_accum = usable
-                else:
-                    tc_chunks = self._build_tool_call_chunks(ctx, parsed)
-                    if not ctx.has_sent_role:
-                        ctx.has_sent_role = True
-                        role_sse = format_sse_chunk(
-                            create_openai_chunk(
-                                ctx.ensure_stream_id(),
-                                ctx.model,
-                                {"role": "assistant"},
-                            )
-                        )
-                        ctx.log_downstream(role_sse)
-                        output.append(role_sse)
-                    output.extend(tc_chunks)
-                    ctx.tool_calls_accum = parsed
-
-        # 降级: JSON 解析
-        if not ctx.tool_calls_accum:
-            json_parsed, _ = parse_and_extract_tool_calls(
-                ctx.buffered_content
-            )
-            normalized = self.normalize_tool_calls(json_parsed)
-            if normalized:
-                ctx.tool_calls_accum = normalized
-                if not ctx.has_sent_role:
-                    ctx.has_sent_role = True
-                    role_sse = format_sse_chunk(
-                        create_openai_chunk(
-                            ctx.ensure_stream_id(),
-                            ctx.model,
-                            {"role": "assistant"},
-                        )
-                    )
-                    ctx.log_downstream(role_sse)
-                    output.append(role_sse)
-                for tool_call in normalized:
-                    sse = format_sse_chunk(
-                        create_openai_chunk(
-                            ctx.ensure_stream_id(),
-                            ctx.model,
-                            {"tool_calls": [tool_call]},
-                        )
-                    )
-                    output.append(sse)
-
-        return output
 
     # ==================================================================
     # 流式响应处理 (主入口)
@@ -1054,19 +940,17 @@ class ResponseHandler:
         if has_tools:
             ctx.detector = StreamingFunctionCallDetector(trigger_signal)
             self.logger.debug(
-                f"🔧 已初始化流式工具检测器, "
-                f"触发信号: {trigger_signal[:20]}..."
+                "🔧 已初始化流式工具检测器, 触发信号: {}...",
+                trigger_signal[:20],
             )
 
         try:
             async for line in response.aiter_lines():
-                # 检查 DONE
-                if self._is_sse_done(line):
+                # 解析 SSE（包含 DONE 判断）
+                parse_state, parsed = self._parse_sse_line(line, ctx)
+                if parse_state == "done":
                     break
-
-                # 解析 SSE
-                parsed = self._parse_sse_line(line, ctx)
-                if parsed is None:
+                if parse_state != "ok" or parsed is None:
                     continue
                 chunk, data = parsed
 
@@ -1122,7 +1006,7 @@ class ResponseHandler:
                 )
                 if parsing_result is not None:
                     # 增补 role 和发送
-                    final_output = self._inject_toolify_role_and_chunks(
+                    final_output = self.toolify_handler.inject_role_and_chunks(
                         ctx, parsing_result
                     )
                     for sse in final_output:
@@ -1214,13 +1098,10 @@ class ResponseHandler:
 
         try:
             async for line in response.aiter_lines():
-                if not line:
-                    continue
-
-                line = line.strip()
-                if not line.startswith("data:"):
+                state, payload = self._extract_sse_data_payload(line)
+                if state == "non_data":
                     try:
-                        maybe_err = json.loads(line)
+                        maybe_err = json.loads(payload)
                         if isinstance(maybe_err, dict) and (
                             "error" in maybe_err
                             or "code" in maybe_err
@@ -1239,17 +1120,11 @@ class ResponseHandler:
                     except Exception:
                         pass
                     continue
-
-                data_str = line[5:].strip()
-                if not data_str or data_str in (
-                    "[DONE]",
-                    "DONE",
-                    "done",
-                ):
+                if state != "data":
                     continue
 
                 try:
-                    chunk = json.loads(data_str)
+                    chunk = json.loads(payload)
                 except json.JSONDecodeError:
                     continue
 
@@ -1332,87 +1207,24 @@ class ResponseHandler:
                     usage_info = chunk["usage"]
 
         except Exception as e:
-            self.logger.error(f"❌ 非流式响应处理错误: {e}")
+            self.logger.error("❌ 非流式响应处理错误: {}", e)
             return handle_error(e, "非流式聚合")
 
-        # 优先尝试 XML 解析
-        if (
-            not tool_calls_accum
-            and trigger_signal
-            and trigger_signal in final_content
-        ):
-            parsed = parse_function_calls_xml(
-                final_content, trigger_signal
-            )
-            if parsed:
-                validation_err = validate_parsed_tools(
-                    parsed, tools_defs
-                )
-                if not validation_err:
-                    normalized = []
-                    for i, tool in enumerate(parsed):
-                        normalized.append(
-                            {
-                                "index": i,
-                                "id": f"call_{uuid.uuid4().hex[:24]}",
-                                "type": "function",
-                                "function": {
-                                    "name": tool["name"],
-                                    "arguments": json.dumps(
-                                        tool["args"],
-                                        ensure_ascii=False,
-                                    ),
-                                },
-                            }
-                        )
-                    if normalized:
-                        tool_calls_accum = normalized
-                        trigger_pos = final_content.find(trigger_signal)
-                        if trigger_pos >= 0:
-                            final_content = final_content[
-                                :trigger_pos
-                            ].strip()
-                        self.logger.info(
-                            f"[tools] XML parse success: "
-                            f"{len(normalized)} tools"
-                        )
-                else:
-                    self.logger.warning(
-                        f"⚠️ 非流式 Schema 验证失败: {validation_err}"
-                    )
-
-        # 降级: JSON 解析
         if not tool_calls_accum:
-            parsed_tool_calls, cleaned_content = (
-                parse_and_extract_tool_calls(final_content)
+            tool_calls_accum, final_content = self.toolify_handler.extract_non_stream_tool_calls(
+                final_content,
+                trigger_signal=trigger_signal,
+                tools_defs=tools_defs,
             )
-            normalized = self.normalize_tool_calls(parsed_tool_calls)
-            if normalized:
-                tool_calls_accum = normalized
-                final_content = cleaned_content
 
         final_content = (final_content or "").strip()
 
         # 清理 GLM 内部工具调用残留
-        final_content = re.sub(
-            r"<glm_block[^>]*>.*?</glm_block>",
-            "",
-            final_content,
-            flags=re.DOTALL,
-        )
-        final_content = re.sub(
-            r"<glm_block[^>]*>.*",
-            "",
-            final_content,
-            flags=re.DOTALL,
-        )
+        final_content = self._GLM_BLOCK_FULL_RE.sub("", final_content)
+        final_content = self._GLM_BLOCK_TAIL_RE.sub("", final_content)
         # 清理完整和末尾截断的引用标记
-        final_content = re.sub(
-            r"【turn\d+(?:search|click)\d+】", "", final_content
-        )
-        final_content = re.sub(
-            r"【turn\d*(?:search|click)?\d*$", "", final_content
-        )
+        final_content = self._CITATION_FULL_RE.sub("", final_content)
+        final_content = self._CITATION_TAIL_RE.sub("", final_content)
 
         reasoning_content = (reasoning_content or "").strip()
 

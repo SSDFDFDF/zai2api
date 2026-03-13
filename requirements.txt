@@ -1,5 +1,5 @@
 fastapi==0.135.1
-granian[reload,pname]==2.7.2
+uvicorn[standard]>=0.34.0
 httpx[http2]==0.28.1
 pydantic==2.12.5
 pydantic-settings==2.13.1
@@ -8,6 +8,8 @@ fake-useragent==2.2.0
 loguru==0.7.3
 psutil>=7.0.0
 json-repair==0.44.1
+PyJWT>=2.8.0
+cryptography>=42.0.0
 
 # Admin Web UI Dependencies
 jinja2==3.1.4

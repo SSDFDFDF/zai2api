@@ -1,13 +1,13 @@
 <!-- 最近请求日志列表 -->
 <script>
-    window.dashboardRecentLogsPage = {{ page.current_page }};
-    window.dashboardRecentLogsPageSize = {{ page.page_size }};
+    window.dashboardRecentLogsPage = parseInt('{{ page.current_page }}') || 1;
+    window.dashboardRecentLogsPageSize = parseInt('{{ page.page_size }}') || 15;
 </script>
 
-<div class="space-y-4">
-    <div class="max-h-[30rem] overflow-auto rounded-2xl border border-slate-200">
+<div class="space-y-4 flex-1 flex flex-col min-h-0" x-data="{ showErrorModal: false, currentError: '' }">
+    <div class="flex-1 overflow-auto rounded-2xl border border-slate-200">
         {% if logs %}
-        <table class="w-full min-w-[1240px] divide-y divide-slate-200">
+        <table class="w-full divide-y divide-slate-200">
             <thead class="bg-slate-50/95 backdrop-blur">
                 <tr>
                     <th
@@ -41,19 +41,17 @@
                     </td>
                     <td class="px-4 py-3 text-sm text-slate-600">
                         <div class="flex max-w-2xl items-center gap-2 overflow-hidden whitespace-nowrap">
-                            <span
-                                class="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                            <span x-data="{ error: '{{ (log.error_message or "") | replace(" \'", "\\\'" ) | escape }}'
+                                }" @click="if (error) { currentError = error; showErrorModal = true; }"
+                                class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium transition-colors {% if log.error_message %} cursor-pointer hover:opacity-80 {% endif %} {% if log.success %} bg-emerald-50 text-emerald-700 {% else %} bg-red-50 text-red-700 {% endif %}">
+                                <span
+                                    class="mr-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full {% if log.success %} bg-emerald-500 {% else %} bg-red-500 animate-pulse {% endif %}"></span>
                                 {{ log.model }}
                             </span>
                             <span class="truncate font-mono text-xs text-slate-500">
                                 {{ log.endpoint }}
                             </span>
                         </div>
-                        {% if log.error_message %}
-                        <p class="mt-1 max-w-2xl truncate text-xs text-red-500">
-                            {{ log.error_message }}
-                        </p>
-                        {% endif %}
                     </td>
                     <td class="px-4 py-3 text-sm text-slate-600">
                         <div class="flex max-w-sm items-center gap-2 overflow-hidden whitespace-nowrap">
@@ -98,11 +96,11 @@
                     </td>
                     <td class="px-4 py-3 whitespace-nowrap text-sm">
                         <span
-                            class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold {% if log.success %}bg-emerald-100 text-emerald-800{% else %}bg-red-100 text-red-800{% endif %}">
+                            class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold {% if log.success %}bg-emerald-100 text-emerald-800{% else %}bg-slate-100 text-slate-600{% endif %}">
                             {{ "成功" if log.success else "失败" }}
                         </span>
                         <span
-                            class="ml-2 text-xs font-medium {% if log.success %}text-emerald-700{% else %}text-red-700{% endif %}">
+                            class="ml-2 text-xs font-medium {% if log.success %}text-emerald-700{% else %}text-slate-500{% endif %}">
                             HTTP {{ log.status_code }}
                         </span>
                     </td>
@@ -131,19 +129,65 @@
             {% endif %}
         </div>
         <div class="flex items-center gap-2">
-            <button type="button" onclick="loadRecentLogsPage({{ page.previous_page }})"
+            <button type="button" onclick="loadRecentLogsPage('{{ page.previous_page }}')"
                 class="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium transition-colors {% if page.has_previous %}bg-white text-gray-700 hover:bg-gray-50{% else %}cursor-not-allowed bg-gray-100 text-gray-400{% endif %}"
-                {% if not page.has_previous %}disabled{% endif %}>
+                {% if not page.has_previous %} disabled {% endif %}>
                 上一页
             </button>
             <span class="min-w-[88px] text-center text-xs text-gray-500">
                 第 {{ page.current_page }} / {{ page.total_pages }} 页
             </span>
-            <button type="button" onclick="loadRecentLogsPage({{ page.next_page }})"
+            <button type="button" onclick="loadRecentLogsPage('{{ page.next_page }}')"
                 class="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium transition-colors {% if page.has_next %}bg-white text-gray-700 hover:bg-gray-50{% else %}cursor-not-allowed bg-gray-100 text-gray-400{% endif %}"
-                {% if not page.has_next %}disabled{% endif %}>
+                {% if not page.has_next %} disabled {% endif %}>
                 下一页
             </button>
+        </div>
+    </div>
+
+    <!-- 错误详情 Modal -->
+    <div x-show="showErrorModal" class="fixed inset-0 z-[60] overflow-y-auto" style="display: none;" x-cloak>
+        <div class="flex min-h-screen items-center justify-center p-4 text-center sm:p-0">
+            <div x-show="showErrorModal" x-transition:enter="ease-out duration-300" x-transition:enter-start="opacity-0"
+                x-transition:enter-end="opacity-100" x-transition:leave="ease-in duration-200"
+                x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0"
+                class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm transition-opacity"
+                @click="showErrorModal = false"></div>
+
+            <div x-show="showErrorModal" x-transition:enter="ease-out duration-300"
+                x-transition:enter-start="opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95"
+                x-transition:enter-end="opacity-100 translate-y-0 sm:scale-100"
+                x-transition:leave="ease-in duration-200"
+                x-transition:leave-start="opacity-100 translate-y-0 sm:scale-100"
+                x-transition:leave-end="opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95"
+                class="relative transform overflow-hidden rounded-2xl bg-white text-left shadow-2xl transition-all sm:my-8 sm:w-full sm:max-w-xl">
+                <div class="bg-white px-4 pb-4 pt-5 sm:p-6 sm:pb-4">
+                    <div class="sm:flex sm:items-start">
+                        <div
+                            class="mx-auto flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-red-100 sm:mx-0 sm:h-10 sm:w-10">
+                            <svg class="h-6 w-6 text-red-600" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
+                                stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round"
+                                    d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                            </svg>
+                        </div>
+                        <div class="mt-3 text-center sm:ml-4 sm:mt-0 sm:text-left w-full">
+                            <h3 class="text-base font-semibold leading-6 text-gray-900">错误详情</h3>
+                            <div class="mt-4">
+                                <div class="rounded-lg bg-slate-50 p-4 font-mono text-sm text-slate-700 break-words whitespace-pre-wrap border border-slate-200"
+                                    x-text="currentError"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="bg-gray-50 px-4 py-3 sm:flex sm:flex-row-reverse sm:px-6">
+                    <button type="button"
+                        class="mt-3 inline-flex w-full justify-center rounded-xl bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 sm:mt-0 sm:w-auto"
+                        @click="showErrorModal = false">
+                        关闭
+                    </button>
+                </div>
+            </div>
         </div>
     </div>
 </div>

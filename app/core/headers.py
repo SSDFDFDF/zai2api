@@ -3,8 +3,7 @@
 
 """统一浏览器 headers 生成。
 
-提供 build_dynamic_headers() 函数，合并原 upstream.py 的 get_dynamic_headers()
-和 guest_session_pool.py 的 _build_dynamic_headers()（两者逻辑完全相同）。
+提供 build_dynamic_headers() 作为唯一入口。
 所有 header 字段和参数均保留。
 """
 
@@ -63,13 +62,17 @@ def build_dynamic_headers(fe_version: str, chat_id: str = "") -> Dict[str, str]:
 
     headers: Dict[str, str] = {
         "Content-Type": "application/json",
-        "Accept": "application/json, text/event-stream",
+        "Accept": "*/*",
         "Connection": "keep-alive",
         "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
         "User-Agent": user_agent,
-        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        "Accept-Language": "zh-CN",
         "X-FE-Version": fe_version,
         "Origin": "https://chat.z.ai",
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "same-origin",
     }
 
     if sec_ch_ua:

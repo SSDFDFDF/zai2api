@@ -9,14 +9,14 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from granian import Granian
+import uvicorn
 
 from app.admin import api as admin_api
 from app.admin import routes as admin_routes
 from app.core import claude, openai
 from app.core.config import settings
 from app.utils.logger import setup_logger
-from app.utils.reload_config import RELOAD_CONFIG
+from app.utils.reload_config import get_uvicorn_reload_config
 
 # Setup logger
 logger = setup_logger(log_dir="logs", debug_mode=settings.DEBUG_LOGGING)
@@ -29,6 +29,14 @@ async def warmup_upstream_client():
         from app.core.openai import get_upstream_client
         await get_latest_fe_version()
         client = get_upstream_client()
+        # 优先从数据库缓存加载在线模型，缓存为空时从上游拉取一次
+        loaded = await client.load_cached_models()
+        if not loaded:
+            logger.info("数据库中无在线模型缓存，首次从上游拉取...")
+            try:
+                await client.get_online_models()
+            except Exception as exc:
+                logger.warning(f"首次拉取在线模型失败，使用硬编码默认值: {exc}")
         logger.info(f"✅ 上游适配器已就绪，支持 {len(client.get_supported_models())} 个模型")
     except Exception as exc:
         logger.warning(f"⚠️ 上游适配器预热失败: {exc}")
@@ -88,9 +96,32 @@ async def lifespan(app: FastAPI):
     await warmup_upstream_client()
     await start_token_automation_scheduler()
 
+    # 可选：在线模型自动刷新后台任务
+    _model_refresh_task = None
+    if settings.MODEL_AUTO_REFRESH_HOURS > 0:
+        async def _model_auto_refresh_loop():
+            interval = settings.MODEL_AUTO_REFRESH_HOURS * 3600
+            while True:
+                await asyncio.sleep(interval)
+                try:
+                    from app.core.openai import get_upstream_client_if_ready
+                    client = get_upstream_client_if_ready()
+                    if client:
+                        client._online_models_time = 0.0
+                        await client.get_online_models()
+                        logger.info("在线模型自动刷新完成")
+                except Exception as exc:
+                    logger.warning(f"在线模型自动刷新失败: {exc}")
+
+        _model_refresh_task = asyncio.create_task(_model_auto_refresh_loop())
+        logger.info(f"在线模型自动刷新已启用，间隔 {settings.MODEL_AUTO_REFRESH_HOURS} 小时")
+
     yield
 
     logger.info("🔄 应用正在关闭...")
+
+    if _model_refresh_task and not _model_refresh_task.done():
+        _model_refresh_task.cancel()
 
     await stop_token_automation_scheduler()
     logger.info("🔄 正在停止 guest session pool...")
@@ -169,16 +200,16 @@ def run_server():
     logger.info(f"🔧 mode: debug {'enabled' if settings.DEBUG_LOGGING else 'disabled'}, anonymous {'enabled' if settings.ANONYMOUS_MODE else 'disabled'}")
 
     try:
-        Granian(
+        uvicorn.run(
             "main:app",
-            interface="asgi",
-            address="0.0.0.0",
+            host="0.0.0.0",
             port=settings.LISTEN_PORT,
-            reload=False,  # 生产环境关闭热重载
-            workers=1,     # ✅ 已经安全开启多进程模式
-            process_name=service_name,  # 设置进程名称
-            **RELOAD_CONFIG,    # 热重载配置
-        ).serve()
+            workers=1,
+            loop="uvloop",
+            http="httptools",
+            log_level="warning",
+            **get_uvicorn_reload_config(),
+        )
     except KeyboardInterrupt:
         logger.info("🛑 received interrupt signal, shutting down...")
     except Exception as e:

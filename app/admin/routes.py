@@ -64,11 +64,43 @@ async def config_page(request: Request):
 
     page_data = build_config_page_data(db_values=db_values)
 
+    # 模型状态数据
+    model_list = []
+    model_parsed = False
+    try:
+        from app.core.openai import get_upstream_client_if_ready
+
+        client = get_upstream_client_if_ready()
+        if client:
+            mgr = client._model_manager
+            model_parsed = mgr._parsed
+            for name in mgr.get_supported_models():
+                caps = mgr.get_model_capabilities(name)
+                upstream_id = mgr.get_upstream_model_id(name) or ""
+                mcp = mgr.get_mcp_servers(name)
+                scene = mgr.get_scene_defaults(name)
+                model_list.append({
+                    "name": name,
+                    "upstream_id": upstream_id,
+                    "tool_use": caps.get("tool_use", False),
+                    "vision": caps.get("vision", False),
+                    "thinking": caps.get("thinking", False),
+                    "web_search": caps.get("web_search", False),
+                    "agent": caps.get("agent", False),
+                    "mcp_servers": mcp,
+                    "scene_defaults": scene,
+                })
+    except Exception:
+        pass
+
     context = {
         "request": request,
         "sections": page_data["sections"],
         "env_content": page_data["env_content"],
         "overview": page_data["overview"],
+        "model_list": model_list,
+        "model_parsed": model_parsed,
+        "model_count": len(model_list),
     }
     return templates.TemplateResponse("config.html", context)
 
@@ -80,6 +112,12 @@ async def logs_page(request: Request):
         "request": request,
     }
     return templates.TemplateResponse("logs.html", context)
+
+
+@router.get("/request-logs", response_class=HTMLResponse, dependencies=[Depends(require_auth)])
+async def request_logs_page(request: Request):
+    """请求日志页面"""
+    return templates.TemplateResponse("request_logs.html", {"request": request})
 
 
 @router.get(

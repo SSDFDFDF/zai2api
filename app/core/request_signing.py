@@ -227,7 +227,7 @@ def build_upstream_body(
         },
         "chat_id": chat_id,
         "id": message_id,
-        "current_user_message_id": message_id,
+        "current_user_message_id": str(uuid.uuid4()),
         "current_user_message_parent_id": parent_message_id,
     }
 
@@ -244,10 +244,10 @@ def build_upstream_body(
     # 避免与上游原生工具处理冲突。
 
     # 处理其他参数
-    if temperature is not None:
-        body["params"]["temperature"] = temperature
-    if max_tokens is not None:
-        body["params"]["max_tokens"] = max_tokens
+    # if temperature is not None:
+    #     body["params"]["temperature"] = temperature
+    # if max_tokens is not None:
+    #     body["params"]["max_tokens"] = max_tokens
 
     return body
 
@@ -300,25 +300,75 @@ async def sign_request(
 
     # 构建请求头（保留所有字段）
     headers = build_dynamic_headers(fe_version, chat_id)
+    user_agent = headers.get("User-Agent", "")
+
+    # 从 User-Agent 推断浏览器和操作系统名
+    if "Edg/" in user_agent:
+        browser_name = "Edge"
+    elif "Firefox/" in user_agent:
+        browser_name = "Firefox"
+    elif "Safari/" in user_agent and "Chrome/" not in user_agent:
+        browser_name = "Safari"
+    else:
+        browser_name = "Chrome"
+
+    if "Windows" in user_agent:
+        os_name = "Windows"
+    elif "Macintosh" in user_agent or "Mac OS" in user_agent:
+        os_name = "macOS"
+    elif "Linux" in user_agent:
+        os_name = "Linux"
+    else:
+        os_name = "Windows"
+
     headers.update(
         {
             "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "X-FE-Version": fe_version,
             "X-Signature": signature,
         }
     )
+
+    # 构建完整的 URL query params（对齐浏览器指纹字段）
+    now_iso = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    now_utc = datetime.utcnow().strftime("%a, %d %b %Y %H:%M:%S GMT")
 
     query_params = {
         "timestamp": str(timestamp_ms),
         "requestId": request_id,
         "user_id": user_id,
-        "token": token,
         "version": "0.0.1",
         "platform": "web",
+        "token": token,
+        "user_agent": user_agent,
+        "language": "zh-CN",
+        "languages": "zh-CN,en,en-GB,en-US",
+        "timezone": "Asia/Shanghai",
+        "cookie_enabled": "true",
+        "screen_width": "2560",
+        "screen_height": "1440",
+        "screen_resolution": "2560x1440",
+        "viewport_height": "1274",
+        "viewport_width": "1574",
+        "viewport_size": "1574x1274",
+        "color_depth": "32",
+        "pixel_ratio": "1",
         "current_url": f"https://chat.z.ai/c/{chat_id}",
         "pathname": f"/c/{chat_id}",
+        "search": "",
+        "hash": "",
+        "host": "chat.z.ai",
+        "hostname": "chat.z.ai",
+        "protocol": "https:",
+        "referrer": "",
+        "title": "Z.ai - Free AI Chatbot & Agent powered by GLM-5 & GLM-4.7",
+        "timezone_offset": "-480",
+        "local_time": now_iso,
+        "utc_time": now_utc,
+        "is_mobile": "false",
+        "is_touch": "false",
+        "max_touch_points": "0",
+        "browser_name": browser_name,
+        "os_name": os_name,
         "signature_timestamp": str(timestamp_ms),
     }
     signed_url = f"{api_endpoint}?{urlencode(query_params)}"

@@ -9,7 +9,8 @@
     <!-- Tailwind CSS (CDN) -->
     <script src="https://cdn.tailwindcss.com"></script>
 
-    <!-- Alpine.js (CDN) -->
+    <!-- Alpine.js Collapse Plugin + Core (CDN) -->
+    <script defer src="https://cdn.jsdelivr.net/npm/@alpinejs/collapse@3.x.x/dist/cdn.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 
     <!-- htmx (CDN) -->
@@ -93,7 +94,7 @@
         }
     }
 }">
-    <div class="min-h-full">
+    <div class="h-screen flex flex-col overflow-hidden">
         <!-- 顶部导航栏 -->
         <nav class="bg-slate-800 shadow-lg">
             <div class="mx-auto px-4 sm:px-6 lg:px-8">
@@ -138,12 +139,12 @@
             </div>
         </nav>
 
-        <div class="flex">
+        <div class="flex flex-1 min-h-0 overflow-hidden">
             <!-- 侧边栏 -->
             <aside x-show="sidebarOpen" x-transition:enter="transition ease-out duration-200"
                 x-transition:enter-start="transform -translate-x-full" x-transition:enter-end="transform translate-x-0"
                 x-transition:leave="transition ease-in duration-200" x-transition:leave-start="transform translate-x-0"
-                x-transition:leave-end="transform -translate-x-full" class="w-64 bg-white shadow-lg min-h-screen">
+                x-transition:leave-end="transform -translate-x-full" class="w-64 bg-white shadow-lg h-full overflow-y-auto">
                 <nav class="mt-5 px-2 space-y-1">
                     {% set current_path = request.url.path %}
 
@@ -155,6 +156,16 @@
                                 d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
                         </svg>
                         仪表盘
+                    </a>
+
+                    <!-- 请求日志 -->
+                    <a href="/admin/request-logs"
+                        class="{% if '/request-logs' in current_path %}bg-slate-100 text-indigo-700{% else %}text-gray-700 hover:bg-gray-100{% endif %} group flex items-center px-3 py-2 text-sm font-medium rounded-md">
+                        <svg class="mr-3 h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                        </svg>
+                        请求日志
                     </a>
 
                     <!-- 配置管理 -->
@@ -205,12 +216,12 @@
             </aside>
 
             <!-- 主内容区 -->
-            <main class="flex-1 p-6">
+            <main class="flex-1 p-6 flex flex-col min-h-0 overflow-auto">
                 <!-- 通知区域 -->
-                <div id="notification" class="mb-4"></div>
-
+                <div id="notification" class="mb-4 flex-shrink-0"></div>
+                
                 <!-- 页面内容 -->
-                <div class="fade-in">
+                <div class="fade-in flex-1 flex flex-col min-h-0">
                     {% block content %}{% endblock %}
                 </div>
             </main>

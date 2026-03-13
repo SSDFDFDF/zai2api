@@ -1,114 +1,108 @@
-<!-- Token 列表表格 -->
+<!-- Token 列表组件 -->
 <script>
     window.tokenListPage = {{ page.current_page }};
     window.tokenListPageSize = {{ page.page_size }};
 </script>
 
-<div class="space-y-4">
-    <div class="max-h-[42rem] overflow-auto rounded-lg border border-gray-100">
+<div class="flex flex-col h-full">
+    <!-- 表格容器 -->
+    <div class="flex-1 min-h-0 overflow-auto border border-gray-100 rounded-lg shadow-sm">
         {% if tokens %}
-        <table class="min-w-full divide-y divide-gray-200">
-            <thead class="bg-gray-50">
+        <table class="min-w-full divide-y divide-gray-200 border-collapse">
+            <thead class="bg-slate-50 sticky top-0 z-10 shadow-sm">
                 <tr>
-                    <th class="sticky top-0 bg-gray-50 px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">ID</th>
-                    <th class="sticky top-0 bg-gray-50 px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Token</th>
-                    <th class="sticky top-0 bg-gray-50 px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">类型</th>
-                    <th class="sticky top-0 bg-gray-50 px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">健康度</th>
-                    <th class="sticky top-0 bg-gray-50 px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">状态</th>
-                    <th class="sticky top-0 bg-gray-50 px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">使用统计</th>
-                    <th class="sticky top-0 bg-gray-50 px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">创建时间</th>
-                    <th class="sticky top-0 bg-gray-50 px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">操作</th>
+                    <th scope="col" class="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">ID</th>
+                    <th scope="col" class="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Token 信息</th>
+                    <th scope="col" class="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider text-center">健康状态</th>
+                    <th scope="col" class="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider text-center">使用统计</th>
+                    <th scope="col" class="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">创建时间</th>
+                    <th scope="col" class="px-6 py-4 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">操作</th>
                 </tr>
             </thead>
-            <tbody class="bg-white divide-y divide-gray-200">
+            <tbody class="bg-white divide-y divide-gray-100 italic-none">
                 {% for token in tokens %}
                 {% include "components/token_row.html" %}
                 {% endfor %}
             </tbody>
         </table>
         {% else %}
-        <div class="text-center py-12 text-gray-500">
-            <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
-            </svg>
-            <p class="mt-2 font-medium">暂无 Token</p>
-            <p class="mt-1 text-sm">点击右上角"添加 Token"按钮开始添加</p>
+        <!-- 空状态 -->
+        <div class="flex flex-col items-center justify-center py-20 bg-slate-50/30">
+            <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 mb-4">
+                <svg class="h-12 w-12 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                </svg>
+            </div>
+            <h3 class="text-lg font-medium text-slate-900">暂无 Token 数据</h3>
+            <p class="mt-1 text-sm text-slate-500 max-w-xs text-center">当前暂无已添加的 Token。您可以点击页面右上角的按钮手动添加或批量导入。</p>
+            <button @click="showAddModal = true" class="mt-6 px-4 py-2 bg-slate-800 text-white rounded-md text-sm font-medium hover:bg-slate-700 transition-all">
+                立即添加
+            </button>
         </div>
         {% endif %}
     </div>
 
-    <div class="flex flex-col gap-3 border-t border-gray-100 pt-4 text-sm text-gray-600 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-            {% if page.total_items > 0 %}
-            显示第 {{ page.start_item }} - {{ page.end_item }} 条，共 {{ page.total_items }} 个 Token
-            {% else %}
-            暂无 Token 数据
-            {% endif %}
-        </div>
-        <div class="flex items-center gap-2">
-            <button
-                type="button"
-                onclick="loadTokenListPage({{ page.previous_page }})"
-                class="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium transition-colors {% if page.has_previous %}bg-white text-gray-700 hover:bg-gray-50{% else %}cursor-not-allowed bg-gray-100 text-gray-400{% endif %}"
-                {% if not page.has_previous %}disabled{% endif %}>
-                上一页
-            </button>
-            <span class="min-w-[88px] text-center text-xs text-gray-500">
-                第 {{ page.current_page }} / {{ page.total_pages }} 页
-            </span>
-            <button
-                type="button"
-                onclick="loadTokenListPage({{ page.next_page }})"
-                class="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium transition-colors {% if page.has_next %}bg-white text-gray-700 hover:bg-gray-50{% else %}cursor-not-allowed bg-gray-100 text-gray-400{% endif %}"
-                {% if not page.has_next %}disabled{% endif %}>
-                下一页
-            </button>
+    <!-- 分页控制 -->
+    <div class="flex items-center justify-between px-6 py-4 bg-white border-t border-gray-100 mt-2 rounded-b-lg">
+        <div class="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
+            <div>
+                <p class="text-sm text-gray-700">
+                    显示 <span class="font-semibold text-slate-900">{{ page.start_item }}</span> 至 <span class="font-semibold text-slate-900">{{ page.end_item }}</span> 条
+                    <span class="mx-1 text-gray-400">/</span>
+                    共 <span class="font-semibold text-slate-900">{{ page.total_items }}</span> 个 Token
+                </p>
+            </div>
+            <div>
+                <nav class="relative z-0 inline-flex rounded-md shadow-sm -space-x-px" aria-label="Pagination">
+                    <button onclick="loadTokenListPage({{ page.previous_page }})"
+                        {% if not page.has_previous %}disabled{% endif %}
+                        class="relative inline-flex items-center px-3 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium {{ 'text-gray-500 hover:bg-gray-50' if page.has_previous else 'text-gray-300 cursor-not-allowed bg-gray-50' }}">
+                        <span class="sr-only">Previous</span>
+                        <svg class="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                            <path fill-rule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clip-rule="evenodd" />
+                        </svg>
+                    </button>
+                    
+                    <div class="relative inline-flex items-center px-4 py-2 border border-gray-300 bg-slate-50 text-sm font-semibold text-slate-700">
+                        {{ page.current_page }} / {{ page.total_pages }}
+                    </div>
+
+                    <button onclick="loadTokenListPage({{ page.next_page }})"
+                        {% if not page.has_next %}disabled{% endif %}
+                        class="relative inline-flex items-center px-3 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium {{ 'text-gray-500 hover:bg-gray-50' if page.has_next else 'text-gray-300 cursor-not-allowed bg-gray-50' }}">
+                        <span class="sr-only">Next</span>
+                        <svg class="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                            <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd" />
+                        </svg>
+                    </button>
+                </nav>
+            </div>
         </div>
     </div>
 </div>
 
-<!-- Token 数量统计（更新页面标题） -->
+<!-- Token 数量统计同步 -->
 <script>
     (function() {
         const tokenCount = {{ page.total_items }};
-        const countElement = document.getElementById('token-count');
-        if (countElement) {
-            countElement.textContent = `(共 ${tokenCount} 个)`;
+        const countBadge = document.getElementById('token-count-badge');
+        if (countBadge) {
+            countBadge.textContent = tokenCount;
         }
     })();
 </script>
 
-<!-- 复制到剪贴板函数 -->
+<!-- 复制到剪贴板优化 -->
 <script>
-    function copyToClipboard(text) {
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-            navigator.clipboard.writeText(text).then(() => {
-                const notification = document.createElement('div');
-                notification.className = 'fixed bottom-4 right-4 bg-green-500 text-white px-4 py-2 rounded shadow-lg z-50';
-                notification.textContent = '✓ Token 已复制到剪贴板';
-                document.body.appendChild(notification);
-
-                setTimeout(() => {
-                    notification.remove();
-                }, 2000);
-            }).catch(err => {
-                console.error('复制失败:', err);
-                alert('复制失败，请手动复制');
-            });
-        } else {
-            const textArea = document.createElement('textarea');
-            textArea.value = text;
-            textArea.style.position = 'fixed';
-            textArea.style.left = '-999999px';
-            document.body.appendChild(textArea);
-            textArea.select();
-            try {
-                document.execCommand('copy');
-                alert('Token 已复制到剪贴板');
-            } catch (err) {
-                alert('复制失败，请手动复制');
-            }
-            document.body.removeChild(textArea);
-        }
+    if (typeof copyToClipboard !== 'function') {
+        window.copyToClipboard = function(text) {
+            const el = document.createElement('textarea');
+            el.value = text;
+            document.body.appendChild(el);
+            el.select();
+            document.execCommand('copy');
+            document.body.removeChild(el);
+            showNotification('✓ Token 已复制到剪贴板', 'success');
+        };
     }
 </script>

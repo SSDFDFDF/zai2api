@@ -608,11 +608,14 @@ async def get_env_preview():
     response_class=HTMLResponse,
     dependencies=[Depends(require_auth)],
 )
-async def get_live_logs():
-    """获取实时日志（最新 50 行）"""
+async def get_live_logs(request: Request):
+    """获取实时日志（最新 N 行）"""
     import os
     from datetime import datetime
 
+    # 获取请求行数，默认 50，最大 2000
+    lines_limit = _get_int_query_param(request, "lines", 50, maximum=2000)
+    
     logs = []
 
     # 尝试读取日志文件
@@ -623,9 +626,9 @@ async def get_live_logs():
             log_file = os.path.join(log_dir, log_files[0])
             try:
                 with open(log_file, 'r', encoding='utf-8') as f:
-                    # 读取最后 50 行
-                    lines = f.readlines()[-50:]
-                    logs = lines
+                    # 读取最后 lines_limit 行
+                    all_lines = f.readlines()
+                    logs = all_lines[-lines_limit:]
             except Exception as e:
                 logs = [f"# [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 读取日志失败: {str(e)}"]
 
@@ -1315,3 +1318,41 @@ async def sync_token_pool():
         <span class="block sm:inline">{message}</span>
     </div>
     """)
+
+
+# ==================== 模型管理 API ====================
+
+@router.post(
+    "/models/refresh",
+    dependencies=[Depends(require_auth), Depends(require_csrf)],
+)
+async def refresh_online_models():
+    """手动刷新在线模型列表（从上游拉取并重新解析变体）。"""
+    from app.core.openai import get_upstream_client
+
+    client = get_upstream_client()
+    # 强制清除缓存时间，使 get_online_models 重新请求上游
+    client._online_models_time = 0.0
+
+    try:
+        models = await client.get_online_models()
+        count = len(models)
+        supported = client.get_supported_models()
+        variant_count = len(supported)
+
+        return _with_hx_trigger(
+            _build_alert(
+                f"从上游获取 {count} 个模型，生成 {variant_count} 个变体。",
+                title="模型刷新成功！",
+                level="success",
+            ),
+            "admin-models-refresh",
+        )
+    except Exception as exc:
+        logger.error(f"❌ 在线模型刷新失败: {exc}")
+        return _build_alert(
+            f"刷新失败: {exc}",
+            title="错误！",
+            level="error",
+            status_code=500,
+        )

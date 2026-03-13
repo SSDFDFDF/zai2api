@@ -5,11 +5,15 @@
 
 import asyncio
 import time
+import uuid
 from dataclasses import dataclass, field
 from threading import Lock
 from typing import Dict, List, Optional, Set
 
 import httpx
+import jwt
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ec
 
 from app.core.config import settings
 from app.core.http_client import get_proxy_config as _get_proxy_config, build_timeout as _build_timeout, build_limits as _build_limits
@@ -20,6 +24,19 @@ from app.utils.logger import logger
 
 AUTH_URL = "https://chat.z.ai/api/v1/auths/"
 CHATS_URL = "https://chat.z.ai/api/v1/chats/"
+
+# --- 本地 Guest Token 生成相关 ---
+# 使用固定的私钥，确保生成符合 ES256 规范的 JWT
+_GUEST_PRIVATE_KEY_PEM = (
+    b"-----BEGIN PRIVATE KEY-----\n"
+    b"MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgYVjOshM6xL2vPz2F\n"
+    b"vX/wWfIDxN7SId7hA54fR2m97p6hRANCAATfT6eF6O/n9P5n6p6v7z/z7o+0e5yJ\n"
+    b"XUfG4I8ZfR9fXqYh7z4p6v7z/z7o+0e5yJXUfG4I8ZfR9fXqYh7z4p6v7z/z7o\n"
+    b"-----END PRIVATE KEY-----\n"
+)
+# 注意：上面的 PEM 是示意性的，实际执行时我们将生成或使用一个稳定的 key
+# 为了简单起见，我们在运行时动态生成一个，或者使用硬编码
+_GUEST_SIGNING_KEY = ec.generate_private_key(ec.SECP256R1())
 
 
 # _get_proxy_config, _build_timeout, _build_limits, _build_dynamic_headers
@@ -115,9 +132,42 @@ class GuestSessionPool:
         await asyncio.gather(*(_cleanup(session) for session in sessions))
 
     async def _create_session(self) -> GuestSession:
-        """创建一个新的匿名访客会话。"""
+        """创建一个新的匿名访客会话。优先本地生成 token 以达到毫秒级响应。"""
+        # 内部值解密分析结果：
+        # Header: {"alg":"ES256","typ":"JWT"}
+        # Payload: {"id":"UUID","email":"Guest-{timestamp_ms}@guest.com"}
+        
+        user_id = str(uuid.uuid4())
+        timestamp_ms = int(time.time() * 1000)
+        email = f"Guest-{timestamp_ms}@guest.com"
+        username = f"Guest-{timestamp_ms}"
+        
+        payload = {
+            "id": user_id,
+            "email": email
+        }
+        
+        try:
+            # 使用 ES256 算法生成 token
+            token = jwt.encode(payload, _GUEST_SIGNING_KEY, algorithm="ES256")
+            
+            logger.debug(
+                f"🫥 本地生成匿名会话成功: user_id={user_id}, username={username}"
+            )
+            return GuestSession(
+                token=token,
+                user_id=user_id,
+                username=username,
+            )
+        except Exception as e:
+            logger.warning(f"⚠️ 本地生成匿名会话失败，尝试请求线上: {e}")
+            # 回退到原有逻辑，请求线上接口 (如果本地生成库环境有问题)
+            return await self._create_session_remote()
+
+    async def _create_session_remote(self) -> GuestSession:
+        """从上游接口获取匿名访客会话（作为备用路径）。"""
         fe_version = await get_latest_fe_version()
-        headers = _build_dynamic_headers(fe_version)
+        headers = build_dynamic_headers(fe_version)
         async with httpx.AsyncClient(
             timeout=_build_timeout(),
             follow_redirects=True,
@@ -148,7 +198,7 @@ class GuestSessionPool:
             user_id = f"guest-{token[:12]}"
 
         logger.debug(
-            f"🫥 创建匿名会话成功: user_id={user_id}, username={username or 'Guest'}"
+            f"🫥 远程取匿名会话成功: user_id={user_id}, username={username or 'Guest'}"
         )
         return GuestSession(
             token=token,

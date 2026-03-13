@@ -68,20 +68,20 @@ def _resolve_claude_model(model: Any) -> str:
         return direct_models[normalized]
 
     alias_map = {
-        "default": settings.GLM5_MODEL,
-        "sonnet": settings.GLM5_MODEL,
+        "default": settings.GLM5_THINKING_MODEL,
+        "sonnet": settings.GLM47_THINKING_MODEL,
         "haiku": settings.GLM45_AIR_MODEL,
-        "opus": settings.GLM5_MODEL,
-        "opusplan": settings.GLM47_THINKING_MODEL,
+        "opus": settings.GLM5_THINKING_MODEL,
+        "opusplan": settings.GLM5_THINKING_MODEL,
     }
     if normalized in alias_map:
         return alias_map[normalized]
 
     # 关键字匹配：任何包含 sonnet/opus/haiku 的 Claude 模型名
     if "sonnet" in normalized:
-        return settings.GLM5_MODEL
+        return settings.GLM47_THINKING_MODEL
     if "opus" in normalized:
-        return settings.GLM5_MODEL
+        return settings.GLM5_THINKING_MODEL
     if "haiku" in normalized:
         return settings.GLM45_AIR_MODEL
 

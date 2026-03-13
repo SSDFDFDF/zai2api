@@ -128,7 +128,9 @@ def format_sse_done() -> str:
 
 def get_error_message(error: Exception) -> str:
     """从异常中提取更友好的错误消息。"""
-    error_str = str(error)
+    error_str = str(error).strip()
+    if not error_str:
+        error_str = repr(error)
     
     # 特殊处理 SSL 错误
     if "SSL" in error_str or "ssl" in error_str:

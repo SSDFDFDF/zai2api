@@ -63,6 +63,11 @@ class Settings(BaseSettings):
     GLM47_THINKING_MODEL: str = os.getenv("GLM47_THINKING_MODEL", "GLM-4.7-Thinking")
     GLM47_SEARCH_MODEL: str = os.getenv("GLM47_SEARCH_MODEL", "GLM-4.7-Search")
     GLM47_ADVANCED_SEARCH_MODEL: str = os.getenv("GLM47_ADVANCED_SEARCH_MODEL", "GLM-4.7-advanced-search")
+    MODEL_BLACKLIST: str = os.getenv("MODEL_BLACKLIST", "glm-4-flash")
+    # 模型别名映射，格式：别名=目标模型名，逗号分隔。例如：gpt-4o=GLM-5,gpt-4o-mini=GLM-4.7
+    MODEL_ALIASES: str = os.getenv("MODEL_ALIASES", "")
+    # 在线模型自动刷新周期（小时），0 表示禁用自动刷新
+    MODEL_AUTO_REFRESH_HOURS: int = int(os.getenv("MODEL_AUTO_REFRESH_HOURS", "0"))
 
     # Server Configuration
     LISTEN_PORT: int = int(os.getenv("LISTEN_PORT", "8080"))
@@ -96,7 +101,7 @@ class Settings(BaseSettings):
     MAX_UPLOAD_FILE_SIZE: int = int(os.getenv("MAX_UPLOAD_FILE_SIZE", str(10 * 1024 * 1024)))
 
     # Upstream User Variables
-    UPSTREAM_USER_NAME: str = os.getenv("UPSTREAM_USER_NAME", "Guest")
+    UPSTREAM_USER_NAME: str = os.getenv("UPSTREAM_USER_NAME", "User")
     UPSTREAM_USER_LOCATION: str = os.getenv("UPSTREAM_USER_LOCATION", "Unknown")
     UPSTREAM_USER_TIMEZONE: str = os.getenv("UPSTREAM_USER_TIMEZONE", "Asia/Shanghai")
     UPSTREAM_USER_LANGUAGE: str = os.getenv("UPSTREAM_USER_LANGUAGE", "zh-CN")

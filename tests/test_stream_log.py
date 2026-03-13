@@ -22,8 +22,8 @@ async def main():
         source_info=source_info,
         started_at=started_at
     )
-    
     async for chunk in stream:
         print(f"Yield: {chunk.strip()}")
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())

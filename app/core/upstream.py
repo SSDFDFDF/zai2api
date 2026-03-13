@@ -29,7 +29,6 @@ from app.core.http_client import SharedHttpClients
 from app.core.headers import build_dynamic_headers
 from app.core.models import ModelManager
 from app.core.message_preprocessing import (
-    preprocess_openai_messages,
     extract_user_id_from_token,
     extract_last_user_text,
 )
@@ -44,6 +43,7 @@ from app.core.retry_policy import (
     is_concurrency_limited,
 )
 from app.core.response_handler import ResponseHandler
+from app.core.toolify import ToolifyRequestHandler
 from app.core.file_upload import upload_file as _upload_file
 from app.core.openai_compat import (
     create_openai_chunk,
@@ -51,10 +51,6 @@ from app.core.openai_compat import (
     format_sse_chunk,
     get_error_message,
     handle_error,
-)
-from app.utils.tool_call_handler import (
-    generate_trigger_signal,
-    process_messages_with_tools,
 )
 from app.models.schemas import OpenAIRequest
 from app.utils.fe_version import get_latest_fe_version
@@ -68,66 +64,6 @@ logger = get_logger()
 def generate_uuid() -> str:
     """生成UUID v4"""
     return str(uuid.uuid4())
-
-
-# --------------------------------------------------------------------------
-# 模块级工具函数（向后兼容：原先是模块级函数，保留对外可见性）
-# --------------------------------------------------------------------------
-
-def get_dynamic_headers(fe_version: str, chat_id: str = "") -> Dict[str, str]:
-    """生成上游请求所需的动态浏览器 headers。（委托到 headers.py）"""
-    return build_dynamic_headers(fe_version, chat_id)
-
-
-def _urlsafe_b64decode(data: str) -> bytes:
-    from app.core.message_preprocessing import _urlsafe_b64decode as _impl
-    return _impl(data)
-
-
-def _decode_jwt_payload(token: str) -> Dict[str, Any]:
-    from app.core.message_preprocessing import _decode_jwt_payload as _impl
-    return _impl(token)
-
-
-def _extract_user_id_from_token(token: str) -> str:
-    return extract_user_id_from_token(token)
-
-
-def _extract_text_from_content(content: Any) -> str:
-    from app.core.message_preprocessing import _extract_text_from_content as _impl
-    return _impl(content)
-
-
-def _stringify_tool_arguments(arguments: Any) -> str:
-    from app.core.message_preprocessing import _stringify_tool_arguments as _impl
-    return _impl(arguments)
-
-
-def _build_tool_call_index(messages: List[Dict[str, Any]]) -> Dict[str, Dict[str, str]]:
-    from app.core.message_preprocessing import _build_tool_call_index as _impl
-    return _impl(messages)
-
-
-def _format_tool_result_message(
-    tool_name: str, tool_arguments: str, result_content: str
-) -> str:
-    from app.core.message_preprocessing import _format_tool_result_message as _impl
-    return _impl(tool_name, tool_arguments, result_content)
-
-
-def _format_assistant_tool_calls(tool_calls: List[Dict[str, Any]]) -> str:
-    from app.core.message_preprocessing import _format_assistant_tool_calls as _impl
-    return _impl(tool_calls)
-
-
-def _preprocess_openai_messages(
-    messages: List[Dict[str, Any]],
-) -> List[Dict[str, Any]]:
-    return preprocess_openai_messages(messages)
-
-
-def _extract_last_user_text(messages: List[Dict[str, Any]]) -> str:
-    return extract_last_user_text(messages)
 
 
 # --------------------------------------------------------------------------
@@ -151,14 +87,7 @@ class UpstreamClient:
         self._model_manager = ModelManager()
         self._retry_policy = RetryPolicy()
         self._response_handler = ResponseHandler()
-
-        # 向后兼容：旧代码可能访问这些属性
-        self.model_mapping = self._model_manager.model_mapping
-        self.model_mcp_servers = self._model_manager.model_mcp_servers
-        self.model_scene_defaults = self._model_manager.model_scene_defaults
-
-        self._shared_client = None
-        self._shared_stream_client = None
+        self._toolify_request_handler = ToolifyRequestHandler()
 
         # 在线模型缓存（实例变量，避免多实例混用）
         self._online_models: Optional[List[Dict[str, Any]]] = None
@@ -166,7 +95,7 @@ class UpstreamClient:
         self._online_models_lock: asyncio.Lock = asyncio.Lock()
 
     # ------------------------------------------------------------------
-    # HTTP 客户端访问（向后兼容）
+    # HTTP 客户端访问
     # ------------------------------------------------------------------
 
     def _get_shared_client(self) -> httpx.AsyncClient:
@@ -310,49 +239,93 @@ class UpstreamClient:
         return is_concurrency_limited(status_code, error_code, error_message)
 
     # ------------------------------------------------------------------
-    # 响应内容辅助方法（委托到 ResponseHandler）
+    # 会话预创建（对齐浏览器 /api/v1/chats/new 流程）
     # ------------------------------------------------------------------
 
-    def _clean_reasoning_delta(self, delta_content: str) -> str:
-        """清理思考阶段的 details 包裹内容。"""
-        return self._response_handler.clean_reasoning_delta(delta_content)
-
-    def _extract_answer_content(self, text: str) -> str:
-        """提取思考结束后的答案正文。"""
-        return self._response_handler.extract_answer_content(text)
-
-    def _normalize_tool_calls(
+    async def _precreate_chat(
         self,
-        raw_tool_calls: Any,
-        start_index: int = 0,
-    ) -> List[Dict[str, Any]]:
-        """标准化上游工具调用为 OpenAI 兼容格式。"""
-        return self._response_handler.normalize_tool_calls(raw_tool_calls, start_index)
+        token: str,
+        fe_version: str,
+        model: str,
+        user_msg_id: str,
+        content: str,
+        enable_thinking: bool = False,
+        auto_web_search: bool = False,
+        mcp_servers: Optional[List[str]] = None,
+    ) -> str:
+        """调用 /api/v1/chats/new 预创建会话，返回服务端分配的 chat_id。
 
-    def _format_search_results(self, data: Dict[str, Any]) -> str:
-        """将上游搜索结果格式化为可追加的 Markdown 引用。"""
-        return self._response_handler.format_search_results(data)
+        浏览器在发 completions 之前会先调用此接口创建会话；
+        缺少此步骤会导致上游在 done 阶段返回 INTERNAL_ERROR。
+        """
+        now_ts = int(time.time())
+        body = {
+            "chat": {
+                "id": "",
+                "title": "新聊天",
+                "models": [model],
+                "params": {},
+                "history": {
+                    "messages": {
+                        user_msg_id: {
+                            "id": user_msg_id,
+                            "parentId": None,
+                            "childrenIds": [],
+                            "role": "user",
+                            "content": content or "hi",
+                            "timestamp": now_ts,
+                            "models": [model],
+                        }
+                    },
+                    "currentId": user_msg_id,
+                },
+                "tags": [],
+                "flags": [],
+                "features": [
+                    {
+                        "type": "tool_selector",
+                        "server": "tool_selector_h",
+                        "status": "hidden",
+                    }
+                ],
+                "mcp_servers": mcp_servers or [],
+                "enable_thinking": enable_thinking,
+                "auto_web_search": auto_web_search,
+                "message_version": 1,
+                "extra": {},
+                "timestamp": int(time.time() * 1000),
+            }
+        }
 
-    # ------------------------------------------------------------------
-    # HTTP 客户端工具方法（向后兼容）
-    # ------------------------------------------------------------------
+        headers = build_dynamic_headers(fe_version)
+        headers["Authorization"] = f"Bearer {token}"
 
-    def _get_proxy_config(self) -> Optional[str]:
-        """Get proxy configuration from settings"""
-        from app.core.http_client import get_proxy_config
-        return get_proxy_config()
+        client = self._get_shared_client()
+        try:
+            resp = await client.post(
+                f"{self.base_url}/api/v1/chats/new",
+                json=body,
+                headers=headers,
+            )
+            if resp.status_code == 200:
+                chat_id = resp.json().get("id", "")
+                if chat_id:
+                    self.logger.debug(
+                        "[chat] pre-created chat_id={}", chat_id
+                    )
+                    return chat_id
+            self.logger.warning(
+                "[chat] pre-create failed: HTTP {}, fallback to random chat_id",
+                resp.status_code,
+            )
+        except Exception as e:
+            self.logger.warning(
+                "[chat] pre-create error: {}, fallback to random chat_id", e
+            )
 
-    def _build_timeout(self, read_timeout: float = 300.0) -> httpx.Timeout:
-        """Create httpx timeout settings tuned for upstream chat traffic."""
-        from app.core.http_client import build_timeout
-        return build_timeout(read_timeout)
+        # 降级：使用随机 chat_id（会触发 done 阶段 INTERNAL_ERROR，但内容不受影响）
+        return generate_uuid()
 
-    def _build_limits(self) -> httpx.Limits:
-        """Create httpx connection limits."""
-        from app.core.http_client import build_limits
-        return build_limits()
-
-    # ------------------------------------------------------------------
     # 在线模型（缓存层保留在本类）
     # ------------------------------------------------------------------
 
@@ -372,6 +345,10 @@ class UpstreamClient:
             try:
                 fe_version = await get_latest_fe_version()
                 headers = build_dynamic_headers(fe_version=fe_version)
+                auth_info = await self.get_auth_info()
+                token = auth_info.get("token", "")
+                if token:
+                    headers["Authorization"] = f"Bearer {token}"
                 client = self._get_shared_client()
                 response = await client.get(
                     f"{self.base_url}/api/models", headers=headers, timeout=10.0
@@ -395,11 +372,11 @@ class UpstreamClient:
                         created_at = info.get("created_at") or int(now)
                         updated_at = info.get("updated_at")
 
-                        meta = info.get("meta", {})
-                        capabilities = meta.get("capabilities", {})
-                        mcp_servers = meta.get("mcpServerIds", [])
+                        meta = info.get("meta") or {}
+                        capabilities = meta.get("capabilities") or {}
+                        mcp_servers = meta.get("mcpServerIds") or []
 
-                        raw_tags = meta.get("tags", [])
+                        raw_tags = meta.get("tags") or []
                         tags = [
                             tag.get("name")
                             for tag in raw_tags
@@ -420,6 +397,9 @@ class UpstreamClient:
 
                     self._online_models = parsed_models
                     self._online_models_time = now
+                    self._model_manager.load_from_online_models(parsed_models)
+                    # 持久化到数据库
+                    await self._save_models_cache(parsed_models)
                     self.logger.debug(
                         f"✅ 在线模型同步成功，共获取 {len(parsed_models)} 个模型"
                     )
@@ -430,6 +410,41 @@ class UpstreamClient:
                 self.logger.warning(f"获取在线模型异常: {exc}")
 
         return self._online_models or []
+
+    _MODELS_CACHE_KEY = "online_models_cache"
+
+    async def _save_models_cache(self, models: List[Dict[str, Any]]) -> None:
+        """将在线模型数据持久化到 config_items 表。"""
+        try:
+            from app.services.config_dao import get_config_dao
+            dao = get_config_dao()
+            await dao.set(self._MODELS_CACHE_KEY, json.dumps(models, ensure_ascii=False))
+            self.logger.debug("在线模型缓存已写入数据库")
+        except Exception as exc:
+            self.logger.warning(f"在线模型缓存写入数据库失败: {exc}")
+
+    async def load_cached_models(self) -> bool:
+        """从数据库加载缓存的在线模型数据，成功返回 True。"""
+        try:
+            from app.services.config_dao import get_config_dao
+            dao = get_config_dao()
+            raw = await dao.get(self._MODELS_CACHE_KEY)
+            if not raw:
+                return False
+            models = json.loads(raw)
+            if not isinstance(models, list) or not models:
+                return False
+            self._online_models = models
+            self._online_models_time = time.time()
+            self._model_manager.load_from_online_models(models)
+            self.logger.info(
+                f"从数据库缓存加载 {len(models)} 个在线模型，"
+                f"生成 {len(self._model_manager.get_supported_models())} 个变体"
+            )
+            return True
+        except Exception as exc:
+            self.logger.warning(f"从数据库加载在线模型缓存失败: {exc}")
+            return False
 
     def get_supported_models(self) -> List[str]:
         """获取支持的模型列表"""
@@ -637,30 +652,15 @@ class UpstreamClient:
             message.model_dump(exclude_none=True) for message in request.messages
         ]
 
-        # NOTE: chat.z.ai 对 OpenAI-style `tools` 的原生支持并不稳定。
-        # 采用 Toolify XML 方案：生成随机触发信号，将工具定义注入 system prompt，
-        # 模型会输出 XML 格式的工具调用，由响应处理器实时检测并转换为 OpenAI tool_calls。
-        tools = request.tools if settings.TOOL_SUPPORT and request.tools else None
         tool_choice = getattr(request, "tool_choice", None)
-
-        # 生成 Toolify XML 触发信号（每次请求唯一）
-        trigger_signal = generate_trigger_signal() if tools else ""
-        if trigger_signal:
-            self.logger.debug(f"🔧 生成 XML 触发信号: {trigger_signal}")
-
-        # 预处理消息（传入 trigger_signal 以便历史工具调用使用正确格式）
-        normalized_messages = preprocess_openai_messages(
-            raw_messages,
-            trigger_signal=trigger_signal,
-        )
-
-        # 注入 XML 工具提示词到 system prompt
-        normalized_messages = process_messages_with_tools(
-            normalized_messages,
-            tools=tools,
+        toolify_prepared = self._toolify_request_handler.prepare(
+            raw_messages=raw_messages,
+            request_tools=request.tools,
             tool_choice=tool_choice,
-            trigger_signal=trigger_signal,
         )
+        tools = toolify_prepared.tools
+        trigger_signal = toolify_prepared.trigger_signal
+        normalized_messages = toolify_prepared.normalized_messages
 
         # 并行拉取 auth_info 和 fe_version，减少 TTFB
         auth_info, fe_version = await asyncio.gather(
@@ -684,8 +684,34 @@ class UpstreamClient:
         guest_user_id = auth_info.get("guest_user_id")
 
         try:
-            # 生成 chat_id
-            chat_id = generate_uuid()
+            # 生成 message_id（后续 chats/new 和 completions 共用）
+            message_id = generate_uuid()
+            user_msg_id = generate_uuid()
+
+            # 提取最后一条用户消息（用于签名和会话预创建）
+            last_user_text = extract_last_user_text(raw_messages)
+
+            # 解析模型特性
+            features = self._model_manager.resolve_model_features(request)
+            self.logger.debug(
+                "Resolved model features for {}: {}, temperature={}, max_tokens={}",
+                request.model,
+                features,
+                request.temperature,
+                request.max_tokens,
+            )
+
+            # 预创建会话：对齐浏览器流程，避免上游 done 阶段 INTERNAL_ERROR
+            chat_id = await self._precreate_chat(
+                token=token,
+                fe_version=fe_version,
+                model=features["upstream_model_id"],
+                user_msg_id=user_msg_id,
+                content=last_user_text,
+                enable_thinking=features["enable_thinking"],
+                auto_web_search=features["auto_web_search"],
+                mcp_servers=features.get("mcp_servers", []),
+            )
 
             # 处理多模态消息（图片上传）
             messages, files = await process_multimodal_messages(
@@ -698,21 +724,10 @@ class UpstreamClient:
                 base_url=self.base_url,
             )
 
-            # 提取最后一条用户消息（用于签名）
-            last_user_text = extract_last_user_text(raw_messages)
-
-            # 解析模型特性
-            features = self._model_manager.resolve_model_features(request)
-            self.logger.debug(
-                f"Resolved model features for {request.model}: {features}, "
-                f"temperature={request.temperature}, max_tokens={request.max_tokens}"
-            )
-
-            message_id = generate_uuid()
             if tools:
                 self.logger.debug(
-                    f"工具定义: {len(tools)} 个工具；"
-                    "XML 提示已注入，tools/tool_choice 不透传到上游 body"
+                    "工具定义: {} 个工具；XML 提示已注入，tools/tool_choice 不透传到上游 body",
+                    len(tools),
                 )
 
             # 构建请求体（Toolify 方案：不透传 tools/tool_choice）
@@ -732,10 +747,15 @@ class UpstreamClient:
                 temperature=request.temperature,
                 max_tokens=request.max_tokens,
             )
+            # 对齐浏览器：current_user_message_id 使用和 chats/new 一致的 ID
+            body["current_user_message_id"] = user_msg_id
             # DEBUG 日志脱敏：仅记录 body 结构，不记录消息内容
-            sanitized = {k: (f"[{len(v)} messages]" if k == "messages" else v)
-                         for k, v in body.items()}
-            self.logger.debug(f"Upstream request body (sanitized): {sanitized}")
+            if settings.DEBUG_LOGGING:
+                sanitized = {
+                    k: (f"[{len(v)} messages]" if k == "messages" else v)
+                    for k, v in body.items()
+                }
+                self.logger.debug("Upstream request body (sanitized): {}", sanitized)
 
             # 签名并生成最终 URL 和 headers（复用已并行拉取的 fe_version）
             signed_url, headers, _fe_version = await sign_request(
@@ -921,10 +941,24 @@ class UpstreamClient:
         current_token = str(transformed.get("token") or "")
 
         client = self._get_shared_stream_client()
+        loop = asyncio.get_running_loop()
+        stream_deadline = loop.time() + settings.HTTP_STREAM_TOTAL_TIMEOUT
 
-        async with asyncio.timeout(settings.HTTP_STREAM_TOTAL_TIMEOUT):  # 流式请求端到端超时保护
-          for attempt in range(max_attempts):
-            self.logger.debug(f"🎯 发送请求到上游: {transformed['url']}")
+        def _remaining_timeout() -> float:
+            return stream_deadline - loop.time()
+
+        for attempt in range(max_attempts):
+            if _remaining_timeout() <= 0:
+                await self._release_guest_session(transformed)
+                return {
+                    "error": {
+                        "message": "流式请求总超时，请重试。",
+                        "type": "stream_timeout",
+                        "code": 504,
+                    }
+                }
+
+            self.logger.debug("🎯 发送请求到上游: {}", transformed["url"])
             req = client.build_request(
                 "POST",
                 transformed["url"],
@@ -933,10 +967,30 @@ class UpstreamClient:
             )
 
             try:
-                response = await client.send(req, stream=True)
+                response = await asyncio.wait_for(
+                    client.send(req, stream=True),
+                    timeout=max(0.1, _remaining_timeout()),
+                )
+            except asyncio.TimeoutError as e:
+                self.logger.error("❌ 上游连接超时: {}", e)
+                if self._is_guest_auth(transformed):
+                    await self._release_guest_session(transformed)
+                elif current_token:
+                    await self.mark_token_failure(current_token, e)
+                return {
+                    "error": {
+                        "message": "上游连接超时，请重试。",
+                        "type": "stream_timeout",
+                        "code": 504,
+                    }
+                }
             except Exception as e:
                 friendly_msg = get_error_message(e)
-                self.logger.error(f"❌ 上游连接异常: {friendly_msg} (raw: {e})")
+                self.logger.error(
+                    "❌ 上游连接异常: {} (raw: {})",
+                    friendly_msg,
+                    e,
+                )
                 if self._is_guest_auth(transformed):
                     await self._release_guest_session(transformed)
                 elif current_token:
@@ -949,9 +1003,12 @@ class UpstreamClient:
                 }
 
             try:
-                error_text = (
-                    await response.aread() if response.status_code != 200 else b""
-                )
+                error_text = b""
+                if response.status_code != 200:
+                    error_text = await asyncio.wait_for(
+                        response.aread(),
+                        timeout=max(0.1, _remaining_timeout()),
+                    )
                 error_msg = error_text.decode("utf-8", errors="ignore")
                 error_code, parsed_error_message = (
                     extract_upstream_error_details(
@@ -1010,8 +1067,8 @@ class UpstreamClient:
                             ),
                         )
                         self.logger.warning(
-                            "⚠️ 流式请求命中认证会话限制，准备切号/回退匿名池: "
-                            f"{current_token[:20]}..."
+                            "⚠️ 流式请求命中认证会话限制，准备切号/回退匿名池: {}...",
+                            current_token[:20],
                         )
                     transformed = await self._refresh_authenticated_request(
                         request,
@@ -1024,9 +1081,9 @@ class UpstreamClient:
 
                 if response.status_code != 200:
                     await response.aclose()
-                    self.logger.error(f"❌ 上游返回错误: {response.status_code}")
+                    self.logger.error("❌ 上游返回错误: {}", response.status_code)
                     if error_msg:
-                        self.logger.error(f"❌ 错误详情: {error_msg}")
+                        self.logger.error("❌ 错误详情: {}", error_msg)
 
                     if not self._is_guest_auth(transformed) and current_token:
                         await self.mark_token_failure(
@@ -1052,19 +1109,18 @@ class UpstreamClient:
                                 "code": 405,
                             }
                         }
-                    else:
-                        return {
-                            "error": {
-                                "message": parsed_error_message
-                                or f"Upstream error: {response.status_code}",
-                                "type": "upstream_error",
-                                "code": error_code or response.status_code,
-                            }
+                    return {
+                        "error": {
+                            "message": parsed_error_message
+                            or f"Upstream error: {response.status_code}",
+                            "type": "upstream_error",
+                            "code": error_code or response.status_code,
                         }
+                    }
 
                 chat_id = transformed["chat_id"]
                 model = transformed["model"]
-                
+
                 async def stream_generator() -> AsyncGenerator[str, None]:
                     success = False
                     disconnect_task: Optional[asyncio.Task] = None
@@ -1076,36 +1132,62 @@ class UpstreamClient:
                             while True:
                                 if await http_request.is_disconnected():
                                     self.logger.info(
-                                        f"[stream] client disconnected, "
-                                        f"closing upstream stream (chat_id={chat_id})"
+                                        "[stream] client disconnected, closing upstream stream (chat_id={})",
+                                        chat_id,
                                     )
                                     await response.aclose()
                                     return
                                 await asyncio.sleep(0.5)
                         except asyncio.CancelledError:
-                            pass  # 正常取消，静默退出
+                            pass
 
                     try:
                         if http_request is not None:
-                            disconnect_task = asyncio.create_task(_wait_for_disconnect())
+                            disconnect_task = asyncio.create_task(
+                                _wait_for_disconnect()
+                            )
 
-                        async for chunk in self._response_handler.handle_stream_response(
-                            response,
-                            chat_id,
-                            model,
-                            request,
-                            transformed,
-                        ):
-                            yield chunk
-                        # 正常迭代完毕
+                        remaining = _remaining_timeout()
+                        if remaining <= 0:
+                            raise asyncio.TimeoutError(
+                                "stream total timeout before consume"
+                            )
+
+                        async with asyncio.timeout(remaining):
+                            async for chunk in self._response_handler.handle_stream_response(
+                                response,
+                                chat_id,
+                                model,
+                                request,
+                                transformed,
+                            ):
+                                yield chunk
                         success = True
+                    except asyncio.TimeoutError as e:
+                        self.logger.error("❌ 流处理超时: {}", e)
+                        if not self._is_guest_auth(transformed) and current_token:
+                            await self.mark_token_failure(current_token, e)
+                        error_response = {
+                            "error": {
+                                "message": "流处理超时，请重试。",
+                                "type": "stream_timeout",
+                                "code": 504,
+                            }
+                        }
+                        yield f"data: {json.dumps(error_response)}\n\n"
+                        yield "data: [DONE]\n\n"
                     except asyncio.CancelledError:
                         self.logger.info(
-                            f"[stream] stream task cancelled (chat_id={chat_id})"
+                            "[stream] stream task cancelled (chat_id={})",
+                            chat_id,
                         )
                     except Exception as e:
                         friendly_msg = get_error_message(e)
-                        self.logger.error(f"❌ 流处理错误: {friendly_msg} (raw: {e})")
+                        self.logger.error(
+                            "❌ 流处理错误: {} (raw: {})",
+                            friendly_msg,
+                            e,
+                        )
                         if not self._is_guest_auth(transformed) and current_token:
                             await self.mark_token_failure(current_token, e)
                         error_response = {
@@ -1117,7 +1199,6 @@ class UpstreamClient:
                         yield f"data: {json.dumps(error_response)}\n\n"
                         yield "data: [DONE]\n\n"
                     finally:
-                        # 取消断连监听 task（流正常完成时）
                         if disconnect_task is not None and not disconnect_task.done():
                             disconnect_task.cancel()
                             try:
@@ -1126,23 +1207,44 @@ class UpstreamClient:
                                 pass
                         await response.aclose()
                         await self._release_guest_session(transformed)
-                        if success and not self._is_guest_auth(transformed) and current_token:
+                        if (
+                            success
+                            and not self._is_guest_auth(transformed)
+                            and current_token
+                        ):
                             token_pool = get_token_pool()
                             if token_pool:
                                 await token_pool.record_token_success(current_token)
 
                 return stream_generator()
 
-            except Exception as e:
-                if 'response' in locals() and response:
-                    await response.aclose()
-                friendly_msg = get_error_message(e)
-                self.logger.error(f"❌ 流处理错误: {friendly_msg} (raw: {e})")
+            except asyncio.TimeoutError as e:
+                await response.aclose()
+                self.logger.error("❌ 流处理超时: {}", e)
                 if self._is_guest_auth(transformed):
                     await self._release_guest_session(transformed)
                 elif current_token:
                     await self.mark_token_failure(current_token, e)
-                
+                return {
+                    "error": {
+                        "message": "流处理超时，请重试。",
+                        "type": "stream_timeout",
+                        "code": 504,
+                    }
+                }
+            except Exception as e:
+                await response.aclose()
+                friendly_msg = get_error_message(e)
+                self.logger.error(
+                    "❌ 流处理错误: {} (raw: {})",
+                    friendly_msg,
+                    e,
+                )
+                if self._is_guest_auth(transformed):
+                    await self._release_guest_session(transformed)
+                elif current_token:
+                    await self.mark_token_failure(current_token, e)
+
                 return {
                     "error": {
                         "message": f"流处理错误: {friendly_msg}",
@@ -1150,6 +1252,7 @@ class UpstreamClient:
                     }
                 }
 
+        await self._release_guest_session(transformed)
         return {
             "error": {
                 "message": "Max retry attempts exhausted.",
@@ -1178,33 +1281,3 @@ class UpstreamClient:
                 trigger_signal=transformed.get("trigger_signal", ""),
                 tools_defs=transformed.get("tools"),
             )
-
-    async def _handle_stream_response(
-        self,
-        response: httpx.Response,
-        chat_id: str,
-        model: str,
-        request: OpenAIRequest,
-        transformed: Dict[str, Any],
-    ) -> AsyncGenerator[str, None]:
-        """处理上游流式响应（委托到 ResponseHandler）。"""
-        async for chunk in self._response_handler.handle_stream_response(
-            response, chat_id, model, request, transformed
-        ):
-            yield chunk
-
-    async def _handle_non_stream_response(
-        self,
-        response: httpx.Response,
-        chat_id: str,
-        model: str,
-        transformed: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
-        """处理非流式响应（委托到 ResponseHandler）。"""
-        trigger_signal = (transformed or {}).get("trigger_signal", "")
-        tools_defs = (transformed or {}).get("tools")
-        return await self._response_handler.handle_non_stream_response(
-            response, chat_id, model,
-            trigger_signal=trigger_signal,
-            tools_defs=tools_defs,
-        )

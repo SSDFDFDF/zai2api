@@ -3,13 +3,25 @@
 {% block title %}实时日志{% endblock %}
 
 {% block content %}
-<div class="space-y-6">
-    <div class="flex items-center justify-between">
+<div class="flex-1 flex flex-col min-h-0 space-y-6">
+    <div class="flex items-center justify-between flex-shrink-0">
         <div>
             <h2 class="text-3xl font-bold text-gray-900">实时日志</h2>
             <p class="mt-1 text-sm text-gray-600">滚动查看服务当前输出的最新日志</p>
         </div>
         <div class="flex items-center space-x-3">
+            <!-- 行数选择 -->
+            <div class="flex items-center space-x-2 bg-gray-50 px-3 py-1.5 rounded border border-gray-200">
+                <span class="text-sm text-gray-600">行数:</span>
+                <select id="log-lines-select" class="bg-transparent text-sm font-medium text-gray-700 outline-none cursor-pointer" onchange="fetchLogs()">
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                    <option value="200" selected>200</option>
+                    <option value="500">500</option>
+                    <option value="1000">1000</option>
+                </select>
+            </div>
+
             <!-- 行数显示 -->
             <span class="text-sm font-medium text-gray-600 bg-gray-100 px-2 py-1.5 rounded" id="log-line-count">0 行</span>
             
@@ -35,8 +47,8 @@
         </div>
     </div>
 
-    <div class="bg-white shadow rounded-lg">
-        <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+    <div class="bg-white shadow rounded-lg flex-1 flex flex-col min-h-0 overflow-hidden">
+        <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between flex-shrink-0">
             <h3 class="text-lg font-medium text-gray-900">日志流</h3>
             <div class="flex space-x-2">
                 <button
@@ -46,10 +58,9 @@
                 </button>
             </div>
         </div>
-        <div class="p-6">
+        <div class="p-6 flex-1 flex flex-col min-h-0">
             <div id="live-logs"
-                class="bg-gray-900 text-gray-100 p-4 rounded-md font-mono text-sm overflow-y-auto overflow-x-auto whitespace-pre-wrap break-all"
-                style="max-height: 600px;">
+                class="flex-1 bg-gray-900 text-gray-100 p-4 rounded-md font-mono text-sm overflow-y-auto overflow-x-auto whitespace-pre-wrap break-all min-h-0">
                 <div class="flex justify-center items-center py-8">
                     <span class="text-gray-500">加载中...</span>
                 </div>
@@ -69,7 +80,8 @@
 
     async function fetchLogs() {
         try {
-            const response = await fetch('/admin/api/live-logs');
+            const lines = document.getElementById('log-lines-select').value || 50;
+            const response = await fetch(`/admin/api/live-logs?lines=${lines}`);
             if (response.ok) {
                 const html = await response.text();
                 logsContainer.innerHTML = html;

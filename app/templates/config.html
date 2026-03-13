@@ -144,6 +144,110 @@
                         <p class="text-sm text-gray-500 leading-relaxed">{{ section.description }}</p>
                     </div>
                 </div>
+
+                {% if section.id == 'models' %}
+                <!-- 在线模型状态 + 刷新 -->
+                <div class="mb-6 rounded-2xl border border-indigo-100 bg-indigo-50/50 p-5" x-data="{ isRefreshing: false }">
+                    <div class="flex items-center justify-between gap-4">
+                        <div class="flex items-center gap-3">
+                            <div class="flex-shrink-0 rounded-xl bg-indigo-100 p-2.5 text-indigo-600">
+                                <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                </svg>
+                            </div>
+                            <div>
+                                <p class="text-sm font-semibold text-gray-800">
+                                    在线模型
+                                    <span class="ml-2 inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium {% if model_parsed %}bg-emerald-100 text-emerald-700{% else %}bg-amber-100 text-amber-700{% endif %}">
+                                        {{ model_count }} 个变体 · {{ '动态解析' if model_parsed else '硬编码回退' }}
+                                    </span>
+                                </p>
+                                <p class="mt-0.5 text-xs text-gray-500">从上游拉取模型列表，自动生成 Thinking / Search / Agent / advanced-search 变体。</p>
+                            </div>
+                        </div>
+                        <button
+                            hx-post="/admin/api/models/refresh"
+                            hx-target="#config-feedback"
+                            hx-swap="innerHTML"
+                            @htmx:before-request="isRefreshing = true"
+                            @htmx:after-request="isRefreshing = false; if ($event.detail.successful) { setTimeout(() => location.reload(), 800); }"
+                            :disabled="isRefreshing"
+                            class="flex-shrink-0 inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed">
+                            <svg :class="isRefreshing && 'animate-spin'" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            </svg>
+                            <span x-text="isRefreshing ? '刷新中...' : '刷新模型'"></span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 模型列表（可收起展开） -->
+                {% if model_list %}
+                <div class="mb-6" x-data="{ open: false }">
+                    <button type="button" @click="open = !open"
+                        class="w-full flex items-center justify-between rounded-2xl border border-gray-200 bg-gray-50/80 px-5 py-3.5 text-left transition-colors hover:bg-gray-100">
+                        <div class="flex items-center gap-2.5">
+                            <svg class="h-5 w-5 flex-shrink-0 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+                            </svg>
+                            <span class="text-sm font-semibold text-gray-800 whitespace-nowrap">模型列表</span>
+                            <span class="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-600">{{ model_list | length }}</span>
+                        </div>
+                        <svg :class="open && 'rotate-180'" class="h-4 w-4 text-gray-400 transition-transform duration-200" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                        </svg>
+                    </button>
+                    <div x-show="open" x-collapse x-cloak
+                        class="mt-2 overflow-hidden rounded-2xl border border-gray-200">
+                        <table class="min-w-full text-sm">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-4 py-3 text-left font-semibold text-gray-700">模型名称</th>
+                                    <th class="px-4 py-3 text-left font-semibold text-gray-700">上游 ID</th>
+                                    <th class="px-4 py-3 text-center font-semibold text-gray-700">能力</th>
+                                    <th class="px-4 py-3 text-left font-semibold text-gray-700">MCP / 场景</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-100">
+                                {% for m in model_list %}
+                                <tr class="hover:bg-gray-50/60 transition-colors">
+                                    <td class="px-4 py-2.5 font-medium text-gray-900 whitespace-nowrap">{{ m.name }}</td>
+                                    <td class="px-4 py-2.5 font-mono text-xs text-gray-500 whitespace-nowrap">{{ m.upstream_id }}</td>
+                                    <td class="px-4 py-2.5 text-center">
+                                        <div class="flex flex-wrap justify-center gap-1">
+                                            {% if m.tool_use %}<span class="inline-block rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700">FC</span>{% endif %}
+                                            {% if m.vision %}<span class="inline-block rounded bg-purple-100 px-1.5 py-0.5 text-[10px] font-semibold text-purple-700">Vision</span>{% endif %}
+                                            {% if m.thinking %}<span class="inline-block rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">Think</span>{% endif %}
+                                            {% if m.web_search %}<span class="inline-block rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">Search</span>{% endif %}
+                                            {% if m.agent %}<span class="inline-block rounded bg-rose-100 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700">Agent</span>{% endif %}
+                                        </div>
+                                    </td>
+                                    <td class="px-4 py-2.5 text-xs text-gray-500">
+                                        {% if m.mcp_servers %}
+                                        <span class="text-indigo-600">{{ m.mcp_servers | join(', ') }}</span>
+                                        {% endif %}
+                                        {% if m.scene_defaults %}
+                                        {% for k, v in m.scene_defaults.items() %}
+                                        <span class="ml-1 text-gray-400">{{ k }}={{ v }}</span>
+                                        {% endfor %}
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                {% else %}
+                <div class="mb-6 rounded-2xl border border-amber-100 bg-amber-50 p-4 text-sm text-amber-700">
+                    尚无在线模型数据，请点击上方"刷新模型"从上游拉取。
+                </div>
+                {% endif %}
+                {% endif %}
+
                 <!-- Fields Grid -->
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2">
                     {% for field in section.fields %}
