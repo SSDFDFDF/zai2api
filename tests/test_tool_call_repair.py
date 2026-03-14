@@ -17,9 +17,11 @@ from app.core.toolify.xml_protocol import (
     _is_xml_noise,
     _extract_cdata_text,
     _parse_args_json_payload,
+    remove_think_blocks,
     parse_function_calls_xml,
     looks_like_complete_function_calls,
 )
+from app.core.toolify.message import preprocess_openai_messages
 
 
 # ===========================================================================
@@ -381,6 +383,96 @@ line 2 translated]]></ARG>
         assert result[0]["args"]["oldText"] == 'line 1\nline 2 "quoted"'
         assert result[0]["args"]["newText"] == "line 1\nline 2 translated"
 
+    def test_missing_args_kv_closer_is_repaired(self):
+        """父标签闭合到达时，应自动补全缺失的 args_kv/arg 闭合。"""
+        xml = f"""{self.TRIGGER}
+<function_calls>
+<function_call>
+<tool>Edit</tool>
+<args_json><![CDATA[{{"filePath": "/tmp/AuditPage.vue"}}]]></args_json>
+<args_kv>
+<arg name="oldText"><![CDATA[<tr>
+  <th>Time</th>
+</tr>]]>
+<arg name="newText"><![CDATA[<tr>
+  <th>时间</th>
+</tr>]]></arg>
+</function_call>
+</function_calls>"""
+
+        result = parse_function_calls_xml(xml, self.TRIGGER)
+        assert result is not None
+        assert result[0]["name"] == "Edit"
+        assert result[0]["args"]["filePath"] == "/tmp/AuditPage.vue"
+        assert "<th>Time</th>" in result[0]["args"]["oldText"]
+        assert "<th>时间</th>" in result[0]["args"]["newText"]
+
+    def test_missing_leaf_closers_are_repaired(self):
+        """tool/args_json 这类叶子标签缺失闭合时，也应在父级切换时补齐。"""
+        xml = f"""{self.TRIGGER}
+<function_calls>
+<function_call>
+<tool>Edit
+<args_json><![CDATA[{{"filePath": "/tmp/demo.txt", "content": "hello"}}]]
+</function_call>
+</function_calls>"""
+
+        result = parse_function_calls_xml(xml, self.TRIGGER)
+        assert result is not None
+        assert result[0]["name"] == "Edit"
+        assert result[0]["args"] == {"filePath": "/tmp/demo.txt", "content": "hello"}
+
+
+class TestThinkingTagCleanup:
+    def test_remove_think_blocks_supports_details_reasoning(self):
+        text = (
+            '回答前缀\n'
+            '<details type="reasoning" done="false">hidden</details>\n'
+            '<reasoning>more hidden</reasoning>\n'
+            '<Function_TEST_Start/>\n'
+            '<function_calls></function_calls>'
+        )
+
+        cleaned = remove_think_blocks(text)
+        assert "<details" not in cleaned
+        assert "<reasoning>" not in cleaned
+        assert "<Function_TEST_Start/>" in cleaned
+
+
+class TestHistoricalToolCallFormatting:
+    def test_preprocess_history_uses_args_kv_for_multiline_strings(self):
+        messages = [
+            {
+                "role": "assistant",
+                "content": "done",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {
+                            "name": "Edit",
+                            "arguments": {
+                                "filePath": "/tmp/AppShell.vue",
+                                "oldText": "const navItems = [\n  { label: \"Dashboard\" }\n];",
+                                "newText": "const navItems = [\n  { label: \"仪表盘\" }\n];",
+                            },
+                        },
+                    }
+                ],
+            }
+        ]
+
+        processed = preprocess_openai_messages(
+            messages,
+            trigger_signal="<Function_TEST_Start/>",
+        )
+        content = processed[0]["content"]
+
+        assert "<args_kv>" in content
+        assert '<arg name="oldText">' in content
+        assert '<arg name="newText">' in content
+        assert '"filePath": "/tmp/AppShell.vue"' in content
+
 
 # ===========================================================================
 # 8. looks_like_complete_function_calls — 畸形标签计数
@@ -402,6 +494,16 @@ class TestLooksLikeComplete:
     def test_incomplete(self):
         buf = '<function_calls><function_call><tool>X</tool>'
         assert looks_like_complete_function_calls(buf) is False
+
+    def test_missing_args_kv_closer_before_parent_close(self):
+        buf = (
+            '<function_calls><function_call><tool>Edit</tool>'
+            '<args_json><![CDATA[{"filePath":"/tmp/AuditPage.vue"}]]></args_json>'
+            '<args_kv><arg name="oldText"><![CDATA[line 1]]>'
+            '<arg name="newText"><![CDATA[line 2]]></arg>'
+            '</function_call></function_calls>'
+        )
+        assert looks_like_complete_function_calls(buf) is True
 
 
 if __name__ == "__main__":

@@ -14,12 +14,14 @@
 """
 
 import json
+import html
 import re
 import secrets
 import string
 import textwrap
 import uuid
 import xml.etree.ElementTree as ET
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.utils.logger import get_logger
@@ -34,6 +36,44 @@ _BARE_FUNCTION_CALLS_OPEN_RE = re.compile(
 _FUNCTION_CALLS_BLOCK_RE = re.compile(
     r"<function_calls>([\s\S]*?)</function_calls>"
 )
+
+THINKING_XML_TAGS = ("details", "think", "reasoning", "thought")
+
+_XMLFC_CONTAINER_TAGS = frozenset(
+    {"function_calls", "function_call", "args_kv", "args"}
+)
+_XMLFC_LEAF_TAGS = frozenset({"tool", "args_json", "arg"})
+_XMLFC_ALL_TAGS = _XMLFC_CONTAINER_TAGS | _XMLFC_LEAF_TAGS
+_XMLFC_CLOSE_TAG_TEXT = {tag: f"</{tag}>" for tag in _XMLFC_ALL_TAGS}
+
+_THINKING_TAG_TOKEN_RE = re.compile(
+    rf"<\s*(?P<close>/)?\s*(?P<tag>{'|'.join(THINKING_XML_TAGS)})\b[^>]*?>",
+    re.IGNORECASE,
+)
+_XMLFC_TAG_TOKEN_RE = re.compile(
+    r"<\s*(?P<close>/)?\s*(?P<tag>function_calls|function_call|tool|args_json|args_kv|args|arg)\b[^>]*?>",
+    re.IGNORECASE,
+)
+
+
+@dataclass(frozen=True)
+class _KnownTagToken:
+    name: str
+    is_close: bool
+    is_self_closing: bool
+    start: int
+    end: int
+    raw: str
+
+
+@dataclass
+class _XMLFCStructureScan:
+    is_complete: bool
+    is_repairable: bool
+    fatal: bool
+    open_stack: List[str] = field(default_factory=list)
+    auto_closed_tags: List[str] = field(default_factory=list)
+    dropped_closing_tags: List[str] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -363,57 +403,129 @@ def process_messages_with_tools(
 # <think> 块处理
 # ---------------------------------------------------------------------------
 
+
+def _match_known_tag_token(
+    text: str,
+    pos: int,
+    pattern: re.Pattern[str],
+) -> Optional[_KnownTagToken]:
+    """在指定位置匹配已知标签，忽略 CDATA 片段。"""
+    if not text or pos < 0 or pos >= len(text) or text[pos] != "<":
+        return None
+    if text.startswith("<![CDATA[", pos):
+        return None
+
+    match = pattern.match(text, pos)
+    if not match:
+        return None
+
+    raw = match.group(0)
+    return _KnownTagToken(
+        name=str(match.group("tag") or "").lower().replace("-", "_"),
+        is_close=bool(match.group("close")),
+        is_self_closing=(not bool(match.group("close")) and raw.rstrip().endswith("/>")),
+        start=pos,
+        end=match.end(),
+        raw=raw,
+    )
+
+
+def _iter_known_tag_tokens(
+    text: str,
+    pattern: re.Pattern[str],
+):
+    """迭代文本中的已知标签，自动跳过 CDATA 内容。"""
+    if not text:
+        return
+
+    pos = 0
+    text_len = len(text)
+    while pos < text_len:
+        lt_pos = text.find("<", pos)
+        if lt_pos == -1:
+            break
+
+        if text.startswith("<![CDATA[", lt_pos):
+            cdata_end = text.find("]]>", lt_pos + len("<![CDATA["))
+            if cdata_end == -1:
+                break
+            pos = cdata_end + len("]]>")
+            continue
+
+        token = _match_known_tag_token(text, lt_pos, pattern)
+        if token is not None:
+            yield token
+            pos = token.end
+            continue
+
+        pos = lt_pos + 1
+
+
 def remove_think_blocks(text: str) -> str:
-    """临时移除所有 <think>...</think> 块用于 XML 解析 (支持嵌套)"""
-    while '<think>' in text and '</think>' in text:
-        start_pos = text.find('<think>')
-        if start_pos == -1:
-            break
+    """移除所有思维包装块，支持 details/think/reasoning/thought。"""
+    if not text:
+        return ""
 
-        pos = start_pos + 7
-        depth = 1
+    kept_parts: List[str] = []
+    keep_start = 0
+    think_stack: List[str] = []
 
-        while pos < len(text) and depth > 0:
-            if text[pos:pos+7] == '<think>':
-                depth += 1
-                pos += 7
-            elif text[pos:pos+8] == '</think>':
-                depth -= 1
-                pos += 8
+    for token in _iter_known_tag_tokens(text, _THINKING_TAG_TOKEN_RE):
+        if token.is_close:
+            if think_stack:
+                while think_stack and think_stack[-1] != token.name:
+                    think_stack.pop()
+                if think_stack and think_stack[-1] == token.name:
+                    think_stack.pop()
+                if not think_stack:
+                    keep_start = token.end
             else:
-                pos += 1
+                kept_parts.append(text[keep_start:token.start])
+                keep_start = token.end
+            continue
 
-        if depth == 0:
-            text = text[:start_pos] + text[pos:]
-        else:
-            break
+        if not think_stack:
+            kept_parts.append(text[keep_start:token.start])
+        think_stack.append(token.name)
 
-    return text
+    if not think_stack:
+        kept_parts.append(text[keep_start:])
+
+    return "".join(kept_parts)
 
 
 def find_last_trigger_signal_outside_think(text: str, trigger_signal: str) -> int:
-    """查找不在 <think> 块内的最后一个触发信号位置。找不到返回 -1。"""
+    """查找不在思维包装块内的最后一个触发信号位置。"""
     if not text or not trigger_signal:
         return -1
 
     i = 0
-    think_depth = 0
     last_pos = -1
+    think_stack: List[str] = []
 
     while i < len(text):
-        if text.startswith("<think>", i):
-            think_depth += 1
-            i += 7
+        if text.startswith("<![CDATA[", i):
+            cdata_end = text.find("]]>", i + len("<![CDATA["))
+            if cdata_end == -1:
+                break
+            i = cdata_end + len("]]>")
             continue
 
-        if text.startswith("</think>", i):
-            think_depth = max(0, think_depth - 1)
-            i += 8
+        token = _match_known_tag_token(text, i, _THINKING_TAG_TOKEN_RE)
+        if token is not None:
+            if token.is_close:
+                while think_stack and think_stack[-1] != token.name:
+                    think_stack.pop()
+                if think_stack and think_stack[-1] == token.name:
+                    think_stack.pop()
+            else:
+                think_stack.append(token.name)
+            i = token.end
             continue
 
-        if think_depth == 0 and text.startswith(trigger_signal, i):
+        if not think_stack and text.startswith(trigger_signal, i):
             last_pos = i
-            i += 1
+            i += len(trigger_signal)
             continue
 
         i += 1
@@ -536,6 +648,118 @@ def normalize_xml_structure(xml_str: str) -> str:
     xml_str = normalize_cdata_markers(xml_str)
     xml_str = normalize_xml_tag_names(xml_str)
     return xml_str
+
+
+def scan_xmlfc_structure(
+    xml_str: str,
+    *,
+    final: bool = False,
+) -> _XMLFCStructureScan:
+    """扫描 xmlfc 标签结构，识别可自动修复的缺失闭合。"""
+    if not xml_str:
+        return _XMLFCStructureScan(False, False, True)
+
+    normalized = repair_unclosed_cdata(normalize_xml_structure(xml_str))
+    stack: List[str] = []
+    auto_closed: List[str] = []
+    dropped_closing: List[str] = []
+    saw_root_open = False
+    saw_root_close = False
+
+    for token in _iter_known_tag_tokens(normalized, _XMLFC_TAG_TOKEN_RE):
+        if token.is_close:
+            if token.name in stack:
+                while stack and stack[-1] != token.name:
+                    auto_closed.append(stack.pop())
+                if stack and stack[-1] == token.name:
+                    stack.pop()
+            else:
+                dropped_closing.append(token.name)
+                continue
+
+            if token.name == "function_calls":
+                saw_root_close = True
+            continue
+
+        while stack and stack[-1] in _XMLFC_LEAF_TAGS:
+            auto_closed.append(stack.pop())
+
+        if not token.is_self_closing:
+            stack.append(token.name)
+            if token.name == "function_calls":
+                saw_root_open = True
+
+    remaining_stack = list(stack)
+    if final and remaining_stack:
+        auto_closed.extend(reversed(remaining_stack))
+        remaining_stack = []
+
+    is_complete = saw_root_open and saw_root_close and not remaining_stack
+    is_repairable = saw_root_open and (saw_root_close or final)
+    fatal = not saw_root_open
+
+    return _XMLFCStructureScan(
+        is_complete=is_complete,
+        is_repairable=is_repairable,
+        fatal=fatal,
+        open_stack=remaining_stack,
+        auto_closed_tags=auto_closed,
+        dropped_closing_tags=dropped_closing,
+    )
+
+
+def repair_xmlfc_structure(
+    xml_str: str,
+    *,
+    final: bool = False,
+) -> str:
+    """基于 xmlfc 标签栈修复缺失闭合标签，过滤孤立闭合标签。"""
+    if not xml_str:
+        return ""
+
+    normalized = repair_unclosed_cdata(normalize_xml_structure(xml_str))
+    repaired_parts: List[str] = []
+    last_end = 0
+    stack: List[str] = []
+
+    for token in _iter_known_tag_tokens(normalized, _XMLFC_TAG_TOKEN_RE):
+        repaired_parts.append(normalized[last_end:token.start])
+
+        if token.is_close:
+            if token.name in stack:
+                while stack and stack[-1] != token.name:
+                    missing = stack.pop()
+                    repaired_parts.append(_XMLFC_CLOSE_TAG_TEXT[missing])
+                if stack and stack[-1] == token.name:
+                    repaired_parts.append(token.raw)
+                    stack.pop()
+            else:
+                logger.debug("🔧 丢弃孤立闭合标签 </{}>", token.name)
+
+            last_end = token.end
+            continue
+
+        while stack and stack[-1] in _XMLFC_LEAF_TAGS:
+            missing = stack.pop()
+            repaired_parts.append(_XMLFC_CLOSE_TAG_TEXT[missing])
+
+        repaired_parts.append(token.raw)
+        if not token.is_self_closing:
+            stack.append(token.name)
+
+        last_end = token.end
+
+    repaired_parts.append(normalized[last_end:])
+
+    if final and stack:
+        while stack:
+            repaired_parts.append(_XMLFC_CLOSE_TAG_TEXT[stack.pop()])
+
+    repaired = "".join(repaired_parts)
+    if repaired != normalized:
+        logger.debug("🔧 XMLFC 结构已修复 ({} → {} 字符)", len(normalized), len(repaired))
+
+    return repaired
 
 
 def repair_json_payload(s: str) -> str:
@@ -759,6 +983,14 @@ def _parse_args_kv_text(raw: Optional[str], *, from_xml: bool = False) -> str:
     return text.strip()
 
 
+def _element_inner_xml(el: ET.Element) -> str:
+    """提取元素内部原始文本，保留子节点 XML。"""
+    parts = [el.text or ""]
+    for child in list(el):
+        parts.append(ET.tostring(child, encoding="unicode"))
+    return "".join(parts)
+
+
 def _parse_args_kv_elements(args_kv_el: ET.Element) -> Dict[str, Any]:
     """从 ET 节点解析 <args_kv><arg name=\"...\">...</arg></args_kv>。"""
     args: Dict[str, Any] = {}
@@ -769,7 +1001,7 @@ def _parse_args_kv_elements(args_kv_el: ET.Element) -> Dict[str, Any]:
         key = str(child.attrib.get("name") or child.attrib.get("key") or "").strip()
         if not key:
             continue
-        args[key] = _parse_args_kv_text(child.text, from_xml=True)
+        args[key] = _parse_args_kv_text(_element_inner_xml(child), from_xml=True)
     return args
 
 
@@ -961,6 +1193,20 @@ def parse_function_calls_xml(
     calls_xml, calls_content, source = located
     logger.debug("🔧 XML 块定位成功, source={}", source)
 
+    structure = scan_xmlfc_structure(calls_xml, final=True)
+    if structure.auto_closed_tags or structure.dropped_closing_tags:
+        logger.debug(
+            "🔧 XMLFC 结构扫描: auto_closed={}, dropped_closing={}",
+            structure.auto_closed_tags,
+            structure.dropped_closing_tags,
+        )
+    repaired_calls_xml = repair_xmlfc_structure(calls_xml, final=True)
+    repaired_match = _FUNCTION_CALLS_BLOCK_RE.search(repaired_calls_xml)
+    if repaired_match:
+        calls_content = repaired_match.group(1)
+    else:
+        calls_content = calls_content
+
     def _coerce_value(v: str):
         try:
             return json.loads(v)
@@ -973,7 +1219,7 @@ def parse_function_calls_xml(
     # ★ 在交给 ET 之前补全未闭合的 CDATA 终止符,
     #   防止流式截断造成 "unclosed CDATA section" ParseError
     try:
-        root = ET.fromstring(repair_unclosed_cdata(calls_xml))
+        root = ET.fromstring(repair_unclosed_cdata(repaired_calls_xml))
         for i, fc in enumerate(root.findall("function_call")):
             tool_el = fc.find("tool")
             name = (tool_el.text or "").strip() if tool_el is not None else ""
@@ -1227,9 +1473,9 @@ class StreamingFunctionCallDetector:
     """流式工具调用检测器
 
     核心特性：
-    1. 避免在 <think> 块内触发工具调用检测
-    2. 正常输出 <think> 块内容给用户
-    3. 支持嵌套 think 标签
+    1. 避免在思维包装块内触发工具调用检测
+    2. 正常输出思维包装块内容给用户
+    3. 支持嵌套 details/think/reasoning/thought 标签
     """
 
     def __init__(self, trigger_signal: str):
@@ -1241,6 +1487,7 @@ class StreamingFunctionCallDetector:
         self.state = "detecting"  # detecting, tool_candidate, tool_parsing
         self.in_think_block = False
         self.think_depth = 0
+        self.think_stack: List[str] = []
         self.signal = self.trigger_signal
         self.signal_len = len(self.signal)
         self.bare_open_len = len("<function_calls>")
@@ -1265,7 +1512,7 @@ class StreamingFunctionCallDetector:
         i = 0
 
         while i < buf_len:
-            # --- think 标签处理 ---
+            # --- 思维标签处理 ---
             skip_chars = self._update_think_state(i)
             if skip_chars > 0:
                 end = min(i + skip_chars, buf_len)
@@ -1277,7 +1524,7 @@ class StreamingFunctionCallDetector:
                 # --- 主路径：严格匹配当前会话信号 ---
                 if (i + self.signal_len <= buf_len
                         and buf[i:i + self.signal_len] == self.signal):
-                    logger.debug("🔧 检测到触发信号 (非 think 块内), 切换到工具解析模式")
+                    logger.debug("🔧 检测到触发信号 (非思维块内), 切换到工具解析模式")
                     self.state = "tool_parsing"
                     self.content_buffer = buf[i:]
                     return True, "".join(parts)
@@ -1310,24 +1557,13 @@ class StreamingFunctionCallDetector:
 
             # --- look-ahead 保留：尾部可能是不完整的标签/信号 ---
             remaining_len = buf_len - i
-            lookahead_len = max(self.signal_len, self.bare_open_len, 8)
+            lookahead_len = max(self.signal_len, self.bare_open_len, 32)
             if remaining_len < lookahead_len:
                 break
 
             # --- 批量跳转到下一个感兴趣的位置 ---
-            # 在 think 块内需找 <think> 和 </think>，在块外需找 <think>、信号首字符
             search_start = i + 1
-            if self.in_think_block:
-                next_think_open = buf.find('<think>', search_start)
-                next_think_close = buf.find('</think>', search_start)
-                candidates = [c for c in (next_think_open, next_think_close) if c != -1]
-                next_pos = min(candidates) if candidates else -1
-            else:
-                # 找 <think> 或信号首字符，取最近的
-                next_think = buf.find('<think>', search_start)
-                next_signal = buf.find("<", search_start)
-                candidates = [c for c in (next_think, next_signal) if c != -1]
-                next_pos = min(candidates) if candidates else -1
+            next_pos = buf.find("<", search_start)
 
             if next_pos == -1:
                 # 没有更多感兴趣位置，批量输出到 look-ahead 边界
@@ -1353,15 +1589,21 @@ class StreamingFunctionCallDetector:
 
     def _update_think_state(self, pos: int) -> int:
         buf = self.content_buffer
-        if buf.startswith('<think>', pos):
-            self.think_depth += 1
-            self.in_think_block = True
-            return 7
-        elif buf.startswith('</think>', pos):
-            self.think_depth = max(0, self.think_depth - 1)
-            self.in_think_block = self.think_depth > 0
-            return 8
-        return 0
+        token = _match_known_tag_token(buf, pos, _THINKING_TAG_TOKEN_RE)
+        if token is None:
+            return 0
+
+        if token.is_close:
+            while self.think_stack and self.think_stack[-1] != token.name:
+                self.think_stack.pop()
+            if self.think_stack and self.think_stack[-1] == token.name:
+                self.think_stack.pop()
+        else:
+            self.think_stack.append(token.name)
+
+        self.think_depth = len(self.think_stack)
+        self.in_think_block = self.think_depth > 0
+        return token.end - token.start
 
     @staticmethod
     def _line_prefix_is_whitespace(buf: str, pos: int) -> bool:
@@ -1411,28 +1653,26 @@ def looks_like_complete_function_calls(buf: str) -> bool:
     """检查缓冲区是否包含完整的 <function_calls> XML 结构。
 
     防止流式传输中因 HTTP 分块边界导致的 XML 片段被过早解析。
-    先对缓冲区做标签归一化, 以便畸形标签也能正确计数。
+    使用结构扫描 + 自动补闭合标签，而不是简单计数。
     """
     if not buf:
         return False
 
-    # ★ 对缓冲区做轻量归一化以匹配畸形标签
-    buf = normalize_xml_tag_names(buf)
-    buf = normalize_cdata_markers(buf)
+    buf = normalize_xml_structure(buf)
+    start = buf.find("<function_calls>")
+    end = buf.rfind("</function_calls>")
+    if start == -1 or end == -1 or end < start:
+        return False
 
-    if "<function_calls>" not in buf or "</function_calls>" not in buf:
+    candidate = buf[start : end + len("</function_calls>")]
+    structure = scan_xmlfc_structure(candidate, final=False)
+    if not structure.is_repairable or not structure.is_complete:
         return False
-    if buf.count("<function_call>") != buf.count("</function_call>"):
-        return False
-    if ("<args_json>" in buf or "</args_json>" in buf) and buf.count("<args_json>") != buf.count("</args_json>"):
-        return False
-    if ("<args_kv>" in buf or "</args_kv>" in buf) and buf.count("<args_kv>") != buf.count("</args_kv>"):
-        return False
-    arg_open_count = len(re.findall(r'<\s*arg\b[^>]*>', buf, flags=re.IGNORECASE))
-    arg_close_count = len(re.findall(r'</\s*arg\s*>', buf, flags=re.IGNORECASE))
-    if (arg_open_count or arg_close_count) and arg_open_count != arg_close_count:
-        return False
-    if ("<![CDATA[" in buf or "]]>" in buf) and buf.count("<![CDATA[") != buf.count("]]>"):
+
+    repaired = repair_unclosed_cdata(repair_xmlfc_structure(candidate, final=False))
+    try:
+        ET.fromstring(repaired)
+    except ET.ParseError:
         return False
     return True
 
@@ -1441,15 +1681,79 @@ def looks_like_complete_function_calls(buf: str) -> bool:
 # 工具调用结果格式化
 # ---------------------------------------------------------------------------
 
+
+def _wrap_cdata(text: str) -> str:
+    safe = (text or "").replace("]]>", "]]]]><![CDATA[>")
+    return f"<![CDATA[{safe}]]>"
+
+
+def _normalize_tool_arguments_dict(arguments_val: Any) -> Dict[str, Any]:
+    try:
+        if isinstance(arguments_val, dict):
+            return arguments_val
+        if isinstance(arguments_val, str):
+            parsed = json.loads(arguments_val or "{}")
+            return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+    return {}
+
+
+def _should_emit_arg_via_args_kv(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    if "\n" in value or "\r" in value:
+        return True
+    if "<" in value or ">" in value:
+        return True
+    if len(value) > 200 and any(ch in value for ch in ('"', "'", "{", "}", "[", "]")):
+        return True
+    return False
+
+
+def _split_xmlfc_arguments(args_dict: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, str]]:
+    args_json: Dict[str, Any] = {}
+    args_kv: Dict[str, str] = {}
+
+    for key, value in (args_dict or {}).items():
+        if _should_emit_arg_via_args_kv(value):
+            args_kv[str(key)] = str(value)
+        else:
+            args_json[str(key)] = value
+
+    return args_json, args_kv
+
+
+def _build_function_call_xml(name: str, args_dict: Dict[str, Any]) -> str:
+    args_json, args_kv = _split_xmlfc_arguments(args_dict)
+    parts = [
+        "<function_call>",
+        f"<tool>{name}</tool>",
+    ]
+
+    if args_json or not args_kv:
+        parts.append(
+            f"<args_json>{_wrap_cdata(json.dumps(args_json, ensure_ascii=False))}</args_json>"
+        )
+
+    if args_kv:
+        parts.append("<args_kv>")
+        for key, value in args_kv.items():
+            key_attr = html.escape(key, quote=True)
+            parts.append(
+                f'<arg name="{key_attr}">{_wrap_cdata(value)}</arg>'
+            )
+        parts.append("</args_kv>")
+
+    parts.append("</function_call>")
+    return "\n".join(parts)
+
+
 def format_assistant_tool_calls_for_ai(
     tool_calls: List[Dict[str, Any]],
     trigger_signal: str,
 ) -> str:
     """将历史 assistant tool_calls 格式化为 AI 可理解的文本。"""
-
-    def _wrap_cdata(text: str) -> str:
-        safe = (text or "").replace("]]>", "]]]]><![CDATA[>")
-        return f"<![CDATA[{safe}]]>"
 
     xml_calls_parts = []
     for tool_call in tool_calls:
@@ -1457,31 +1761,15 @@ def format_assistant_tool_calls_for_ai(
         name = function_info.get("name", "")
         arguments_val = function_info.get("arguments", "{}")
 
-        try:
-            if isinstance(arguments_val, dict):
-                args_dict = arguments_val
-            elif isinstance(arguments_val, str):
-                parsed = json.loads(arguments_val or "{}")
-                if not isinstance(parsed, dict):
-                    args_dict = {}
-                else:
-                    args_dict = parsed
-            else:
-                args_dict = {}
-        except Exception:
-            args_dict = {}
+        if not name:
+            continue
 
-        args_payload = json.dumps(args_dict, ensure_ascii=False)
-        xml_call = (
-            f"<function_call>\n"
-            f"<tool>{name}</tool>\n"
-            f"<args_json>{_wrap_cdata(args_payload)}</args_json>\n"
-            f"</function_call>"
-        )
-        xml_calls_parts.append(xml_call)
+        args_dict = _normalize_tool_arguments_dict(arguments_val)
+        xml_calls_parts.append(_build_function_call_xml(name, args_dict))
 
     all_calls = "\n".join(xml_calls_parts)
-    return f"{trigger_signal}\n<function_calls>\n{all_calls}\n</function_calls>"
+    prefix = f"{trigger_signal}\n" if trigger_signal else ""
+    return f"{prefix}<function_calls>\n{all_calls}\n</function_calls>"
 
 
 # ---------------------------------------------------------------------------

@@ -28,6 +28,7 @@ from app.models.schemas import OpenAIRequest
 from app.utils.logger import get_logger
 from app.core.toolify.xml_protocol import (
     StreamingFunctionCallDetector,
+    THINKING_XML_TAGS,
 )
 
 logger = get_logger()
@@ -258,7 +259,7 @@ class ResponseHandler:
         return delta_content
 
     # 所有可能包裹思维内容的 XML 标签名（通用化，新增标签只需在此添加）
-    _THINKING_TAGS = ("details", "think", "reasoning", "thought")
+    _THINKING_TAGS = THINKING_XML_TAGS
     _THINKING_TAGS_ALT = "|".join(_THINKING_TAGS)
     # 预编译的关闭标签正则：匹配 </details> 或 </think> 等
     _THINKING_CLOSE_RE = re.compile(

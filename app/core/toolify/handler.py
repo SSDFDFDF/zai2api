@@ -217,16 +217,16 @@ class ToolifyHandler:
             validation_err = validate_parsed_tools(parsed, tools_defs)
             if validation_err:
                 logger.warning("⚠️ 流结束时 Schema 验证失败: {}", validation_err)
-                usable = [
-                    p
-                    for p in parsed
-                    if p.get("name")
-                    and isinstance(p.get("args"), dict)
-                    and p["args"]
-                ]
+                usable = []
+                for idx, call in enumerate(parsed, start=1):
+                    call_err = validate_parsed_tools([call], tools_defs)
+                    if call_err:
+                        logger.warning("⚠️ 丢弃结构受损的工具调用 #{}: {}", idx, call_err)
+                        continue
+                    usable.append(call)
                 if usable:
                     logger.warning(
-                        "⚠️ Schema 验证失败但参数非空, 强制发送 {} 个工具调用",
+                        "⚠️ Schema 验证失败, 仅发送 {} 个逐项校验通过的工具调用",
                         len(usable),
                     )
                     self._append_tool_calls_output(

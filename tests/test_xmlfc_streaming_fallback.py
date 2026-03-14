@@ -9,6 +9,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from app.core.response_handler import ResponseHandler
+from app.core.toolify.handler import ToolifyHandler
 from app.models.schemas import OpenAIRequest
 
 
@@ -211,3 +212,57 @@ def test_streaming_triggered_args_kv_edit_tool_parses():
     assert arguments["filePath"] == "/tmp/AppShell.vue"
     assert 'label: "Dashboard"' in arguments["oldText"]
     assert 'label: "仪表盘"' in arguments["newText"]
+
+
+class _FinalizeCtx:
+    def __init__(self, buffered_content, tools_defs, trigger_signal):
+        self.model = "GLM-5-Thinking"
+        self.has_sent_role = False
+        self.trigger_signal = trigger_signal
+        self.tools_defs = tools_defs
+        self.tool_calls_accum = []
+        self.buffered_content = buffered_content
+        self.detector = None
+        self.last_phase = "done"
+        self._stream_id = "chatcmpl-finalize-test"
+        self.logged = []
+
+    def ensure_stream_id(self, chunk_data=None):
+        return self._stream_id
+
+    def log_downstream(self, sse_data):
+        self.logged.append(sse_data)
+
+
+def test_finalize_only_emits_schema_valid_tool_calls():
+    trigger_signal = "<Function_TEST_Start/>"
+    buffered_content = f"""{trigger_signal}
+<function_calls>
+<function_call>
+<tool>Edit</tool>
+<args_json><![CDATA[{{"filePath": "/tmp/invalid.vue"}}]]></args_json>
+</function_call>
+<function_call>
+<tool>Edit</tool>
+<args_json><![CDATA[{{"filePath": "/tmp/valid.vue"}}]]></args_json>
+<args_kv>
+<arg name="oldText"><![CDATA[old]]></arg>
+<arg name="newText"><![CDATA[new]]></arg>
+</args_kv>
+</function_call>
+</function_calls>"""
+
+    ctx = _FinalizeCtx(buffered_content, [EDIT_TOOL], trigger_signal)
+    handler = ToolifyHandler()
+    outputs = handler.finalize_stream_tool_calls(ctx)
+    payloads = _extract_chunks(outputs)
+
+    tool_calls = []
+    for payload in payloads:
+        tool_calls.extend(payload["choices"][0].get("delta", {}).get("tool_calls", []) or [])
+
+    assert len(tool_calls) == 1
+    arguments = json.loads(tool_calls[0]["function"]["arguments"])
+    assert arguments["filePath"] == "/tmp/valid.vue"
+    assert arguments["oldText"] == "old"
+    assert arguments["newText"] == "new"

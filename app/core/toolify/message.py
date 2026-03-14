@@ -10,6 +10,8 @@
 import json
 from typing import Any, Dict, List
 
+from app.core.toolify.xml_protocol import format_assistant_tool_calls_for_ai
+
 
 # ---------------------------------------------------------------------------
 # 消息内容工具
@@ -119,44 +121,10 @@ def _format_assistant_tool_calls(
     tool_calls: List[Dict[str, Any]],
     trigger_signal: str = "",
 ) -> str:
-    """Serialize historical assistant tool calls into Toolify XML format.
-
-    Args:
-        tool_calls: list of tool call dicts with 'function' sub-dict.
-        trigger_signal: XML trigger signal, e.g. '<Function_AB1c_Start/>'.
-            When provided, the output will start with the trigger signal
-            so upstream LLM can correctly recognize this as a past tool call.
-    """
-    blocks: List[str] = []
-
-    for tool_call in tool_calls:
-        if not isinstance(tool_call, dict):
-            continue
-
-        function_data = (
-            tool_call.get("function")
-            if isinstance(tool_call.get("function"), dict)
-            else {}
-        )
-        name = str(function_data.get("name", "")).strip()
-        if not name:
-            continue
-
-        arguments = _stringify_tool_arguments(function_data.get("arguments"))
-        # Wrap arguments in CDATA to avoid XML escaping issues
-        safe_args = (arguments or "").replace("]]>", "]]]]><![CDATA[>")
-        blocks.append(
-            "<function_call>\n"
-            f"<tool>{name}</tool>\n"
-            f"<args_json><![CDATA[{safe_args}]]></args_json>\n"
-            "</function_call>"
-        )
-
-    if not blocks:
+    """Serialize historical assistant tool calls into Toolify XML format."""
+    if not tool_calls:
         return ""
-
-    prefix = f"{trigger_signal}\n" if trigger_signal else ""
-    return prefix + "<function_calls>\n" + "\n".join(blocks) + "\n</function_calls>"
+    return format_assistant_tool_calls_for_ai(tool_calls, trigger_signal)
 
 
 # ---------------------------------------------------------------------------
