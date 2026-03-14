@@ -539,6 +539,40 @@ def _is_xml_noise(s: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
+def _repair_unescaped_quotes(s: str) -> Optional[Dict[str, Any]]:
+    """迭代修复 JSON 字符串值内的未转义双引号。
+
+    利用 json.JSONDecodeError.pos 定位解析失败点，回溯找到导致字符串
+    提前关闭的未转义引号并插入反斜杠，然后重试。最多尝试 20 轮。
+    """
+    current = s.strip()
+    if not current:
+        return None
+    for _ in range(20):
+        try:
+            result = json.loads(current)
+            return result if isinstance(result, dict) else None
+        except json.JSONDecodeError as e:
+            pos = e.pos
+            if pos <= 0 or pos >= len(current):
+                return None
+            # 错误位置前应有一个未转义的引号导致字符串提前关闭
+            quote_pos = current.rfind('"', 0, pos)
+            if quote_pos <= 0:
+                return None
+            # 确认该引号不是已转义的
+            num_bs = 0
+            check = quote_pos - 1
+            while check >= 0 and current[check] == '\\':
+                num_bs += 1
+                check -= 1
+            if num_bs % 2 == 1:
+                # 已转义，问题在别处，放弃
+                return None
+            current = current[:quote_pos] + '\\' + current[quote_pos:]
+    return None
+
+
 def _parse_args_json_payload(payload: str) -> Optional[Dict[str, Any]]:
     """鲁棒的 args_json 解析（合并 PR #8 的改进）
 
@@ -571,7 +605,7 @@ def _parse_args_json_payload(payload: str) -> Optional[Dict[str, Any]]:
     if parsed is not None:
         return parsed
 
-    # 恢复策略: 提取平衡的 JSON 对象
+    # 恢复策略 1: 提取平衡的 JSON 对象
     start = s.find("{")
     if start != -1:
         depth = 0
@@ -609,6 +643,12 @@ def _parse_args_json_payload(payload: str) -> Optional[Dict[str, Any]]:
                             logger.debug("🔧 args_json 通过平衡对象提取恢复成功")
                             return parsed
                         break
+
+    # 恢复策略 2: 迭代修复字符串值内的未转义双引号
+    repaired = _repair_unescaped_quotes(s)
+    if repaired is not None:
+        logger.debug("🔧 args_json 通过未转义引号修复恢复成功")
+        return repaired
 
     logger.debug("🔧 args_json 在所有恢复尝试后仍无效")
     return None
