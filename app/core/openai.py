@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-import json
 import time
 from typing import Optional
 
@@ -10,13 +9,9 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.core.config import settings
 from app.models.schemas import (
-    Choice,
-    Message,
     Model,
     ModelsResponse,
     OpenAIRequest,
-    OpenAIResponse,
-    Usage,
 )
 from app.core.upstream import UpstreamClient
 from app.utils.logger import get_logger
@@ -46,89 +41,6 @@ def get_upstream_client_if_ready() -> Optional[UpstreamClient]:
     return _upstream_client
 
 
-async def handle_non_stream_response(stream_response, request: OpenAIRequest) -> JSONResponse:
-    """处理非流式响应。"""
-    logger.info("[stream] start handle non stream response")
-
-    full_content = []
-    reasoning_content = []
-    tool_calls_dict = {}
-    usage_info = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-
-    async for chunk_data in stream_response():
-        if chunk_data.startswith("data: "):
-            chunk_str = chunk_data[6:].strip()
-            if chunk_str and chunk_str != "[DONE]":
-                try:
-                    chunk = json.loads(chunk_str)
-                    
-                    if "usage" in chunk and chunk["usage"]:
-                        usage = chunk["usage"]
-                        usage_info.update(usage)
-
-                    if "choices" in chunk and chunk["choices"]:
-                        choice = chunk["choices"][0]
-                        delta = choice.get("delta", {})
-                        
-                        if "content" in delta and delta["content"]:
-                            full_content.append(delta["content"])
-                            
-                        if "reasoning_content" in delta and delta["reasoning_content"]:
-                            reasoning_content.append(delta["reasoning_content"])
-                            
-                        if "tool_calls" in delta:
-                            for tc in delta["tool_calls"]:
-                                index = tc.get("index", 0)
-                                if index not in tool_calls_dict:
-                                    tool_calls_dict[index] = {
-                                        "id": tc.get("id") or f"call_{int(time.time())}_{index}",
-                                        "type": "function",
-                                        "function": {
-                                            "name": tc.get("function", {}).get("name", ""),
-                                            "arguments": ""
-                                        }
-                                    }
-                                if "function" in tc and isinstance(tc["function"].get("arguments"), str):
-                                    tool_calls_dict[index]["function"]["arguments"] += tc["function"]["arguments"]
-                except json.JSONDecodeError:
-                    continue
-
-    message_kwargs = {
-        "role": "assistant",
-        "content": "".join(full_content) or None,
-    }
-    
-    if reasoning_content:
-        message_kwargs["reasoning_content"] = "".join(reasoning_content)
-        
-    if tool_calls_dict:
-        message_kwargs["tool_calls"] = [tool_calls_dict[k] for k in sorted(tool_calls_dict.keys())]
-    else:
-        message_kwargs["tool_calls"] = None
-
-    response_data = OpenAIResponse(
-        id=f"chatcmpl-{int(time.time())}",
-        object="chat.completion",
-        created=int(time.time()),
-        model=request.model,
-        choices=[
-            Choice(
-                index=0,
-                message=Message(**message_kwargs),
-                finish_reason="tool_calls" if tool_calls_dict else "stop",
-            )
-        ],
-        usage=Usage(
-            prompt_tokens=usage_info.get("prompt_tokens", 0),
-            completion_tokens=usage_info.get("completion_tokens", 0),
-            total_tokens=usage_info.get("total_tokens", 0),
-        ),
-    )
-
-    logger.info("[stream] end handle non stream response")
-    return JSONResponse(content=response_data.model_dump(exclude_none=True))
-
-
 @router.get("/v1/models")
 async def list_models():
     """返回当前服务支持的模型列表（含能力声明）。"""
@@ -149,7 +61,7 @@ async def list_models():
         )
         return JSONResponse(content=response.model_dump(exclude_none=True))
     except Exception as exc:
-        logger.error(f"❌ 获取模型列表失败: {exc}")
+        logger.error("❌ 获取模型列表失败: {}", exc)
         raise HTTPException(status_code=500, detail=f"Failed to list models: {exc}")
 
 
@@ -168,20 +80,26 @@ async def chat_completions(
     source_prefix = format_request_source(source_info)
     started_at = time.perf_counter()
     body.started_at = started_at
+    bearer_token = (
+        authorization[7:]
+        if authorization and authorization.startswith("Bearer ")
+        else None
+    )
 
     role = body.messages[0].role if body.messages else "unknown"
     logger.info(
-        f"{source_prefix} OpenAI req - model: {body.model}, stream: {body.stream}, messages: {len(body.messages)}, role: {role}, tools: {len(body.tools) if body.tools else 0}"
+        "{} OpenAI req - model: {}, stream: {}, messages: {}, role: {}, tools: {}",
+        source_prefix, body.model, body.stream, len(body.messages), role,
+        len(body.tools) if body.tools else 0,
     )
-    logger.debug(f"{source_prefix} 客户端请求原样数据: {body}")
+    logger.debug("{} 客户端请求原样数据: {}", source_prefix, body)
 
     try:
         if not settings.SKIP_AUTH_TOKEN:
-            if not authorization or not authorization.startswith("Bearer "):
+            if not bearer_token:
                 raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
 
-            api_key = authorization[7:]
-            if api_key != settings.AUTH_TOKEN:
+            if bearer_token != settings.AUTH_TOKEN:
                 raise HTTPException(status_code=401, detail="Invalid API key")
 
         client = get_upstream_client()
@@ -202,6 +120,7 @@ async def chat_completions(
                         provider="zai",
                         model=body.model,
                         source_info=source_info,
+                        auth_token=bearer_token,
                         started_at=started_at,
                     ),
                     media_type="text/event-stream",
@@ -221,6 +140,7 @@ async def chat_completions(
                 provider="zai",
                 model=body.model,
                 source_info=source_info,
+                auth_token=bearer_token,
                 success="error" not in result,
                 started_at=started_at,
                 status_code=200 if "error" not in result else 500,
@@ -233,29 +153,19 @@ async def chat_completions(
             )
             return JSONResponse(content=result)
 
-        response = await handle_non_stream_response(result, body)
-        response_body = json.loads(response.body)
-        usage = extract_openai_usage(response_body)
-        await write_request_log(
-            provider="zai",
-            model=body.model,
-            source_info=source_info,
-            success=True,
-            started_at=started_at,
-            status_code=200,
-            input_tokens=usage["input_tokens"],
-            output_tokens=usage["output_tokens"],
-            cache_creation_tokens=usage["cache_creation_tokens"],
-            cache_read_tokens=usage["cache_read_tokens"],
-            total_tokens=usage["total_tokens"],
+        # Non-stream non-dict should not happen in current flow;
+        # upstream always returns dict for non-stream.
+        raise HTTPException(
+            status_code=500,
+            detail="Unexpected non-stream result type from upstream",
         )
-        return response
 
     except HTTPException as exc:
         await write_request_log(
             provider="zai",
             model=body.model,
             source_info=source_info,
+            auth_token=bearer_token,
             success=False,
             started_at=started_at,
             status_code=exc.status_code,
@@ -263,11 +173,12 @@ async def chat_completions(
         )
         raise
     except Exception as exc:
-        logger.error(f"{source_prefix} ❌ 请求处理失败: {exc}")
+        logger.error("{} ❌ 请求处理失败: {}", source_prefix, exc)
         await write_request_log(
             provider="zai",
             model=body.model,
             source_info=source_info,
+            auth_token=bearer_token,
             success=False,
             started_at=started_at,
             status_code=500,

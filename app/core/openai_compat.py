@@ -24,19 +24,19 @@ def create_openai_chunk(
     model: str,
     delta: Dict[str, Any],
     finish_reason: Optional[str] = None,
+    created: Optional[int] = None,
 ) -> Dict[str, Any]:
     """创建 OpenAI 格式的流式响应块。"""
     return {
         "id": chat_id,
         "object": "chat.completion.chunk",
-        "created": int(time.time()),
+        "created": created if created is not None else int(time.time()),
         "model": model,
         "choices": [
             {
                 "index": 0,
                 "delta": delta,
                 "finish_reason": finish_reason,
-                "logprobs": None,
             }
         ],
         "system_fingerprint": SYSTEM_FINGERPRINT,
@@ -162,7 +162,7 @@ def handle_error(error: Exception, context: str = "") -> Dict[str, Any]:
 
     friendly_msg = get_error_message(error)
     error_msg = f"上游{context}错误: {friendly_msg}" if context else f"上游错误: {friendly_msg}"
-    logger.error(f"{error_msg} (raw: {error})")
+    logger.error("{} (raw: {})", error_msg, error)
     
     return {
         "error": {

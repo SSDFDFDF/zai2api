@@ -134,15 +134,22 @@ def _format_tool_result_message(
     tool_arguments: str,
     result_content: str,
 ) -> str:
-    """Serialize a tool result into a text block the upstream can consume."""
+    """Serialize a tool result into a compact XML block the upstream can consume.
+
+    - Uses ``<tool_response>`` XML wrapper instead of natural-language headers
+      to reduce the chance of upstream models echoing the result verbatim.
+    - Omits ``tool_arguments`` (the model already knows what it called).
+    - Truncates ``result_content`` exceeding ``TOOL_RESULT_MAX_LENGTH``.
+    """
+    from app.core.config import settings
+
+    max_len = settings.TOOL_RESULT_MAX_LENGTH
+    if max_len and len(result_content) > max_len:
+        result_content = result_content[:max_len] + "\n... [truncated]"
     return (
-        "Tool execution result:\n"
-        f"- Tool name: {tool_name}\n"
-        f"- Tool arguments: {tool_arguments}\n"
-        f"- Execution result:\n"
-        f"<tool_result>\n"
+        f'<tool_response tool="{tool_name}">\n'
         f"{result_content}\n"
-        f"</tool_result>"
+        f"</tool_response>"
     )
 
 

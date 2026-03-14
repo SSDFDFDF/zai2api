@@ -101,6 +101,16 @@ CONFIG_SECTIONS: tuple[ConfigSectionSpec, ...] = (
                 placeholder="200000",
             ),
             ConfigFieldSpec(
+                key="TOOL_RESULT_MAX_LENGTH",
+                label="工具结果截断长度",
+                description="工具执行结果超过此长度时截断，0 表示不截断。",
+                value_type="int",
+                default_value=0,
+                input_type="number",
+                min_value=0,
+                placeholder="0",
+            ),
+            ConfigFieldSpec(
                 key="UPSTREAM_BACKGROUND_TASKS",
                 label="上游背景任务",
                 description="是否允许上游执行标题生成、搜索总结等背景任务（开启可能消耗更多额度/时间）。",

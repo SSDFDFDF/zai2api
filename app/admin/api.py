@@ -445,6 +445,7 @@ async def get_recent_logs(request: Request):
                     str(row.get("protocol") or "unknown")
                 ),
                 "client_name": client_name,
+                "auth_token": str(row.get("auth_token") or ""),
                 "success": success,
                 "status_code": status_code,
                 "duration_display": f"{duration_value:.2f}s",

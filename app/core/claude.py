@@ -393,6 +393,11 @@ async def claude_messages(
     source_prefix = format_request_source(source_info)
     started_at = time.perf_counter()
     requested_model = "unknown"
+    bearer_token = (
+        authorization[7:]
+        if authorization and authorization.startswith("Bearer ")
+        else None
+    )
 
     try:
         body = await request.json()
@@ -401,6 +406,7 @@ async def claude_messages(
             provider="zai",
             model=requested_model,
             source_info=source_info,
+            auth_token=bearer_token,
             success=False,
             started_at=started_at,
             status_code=400,
@@ -427,6 +433,7 @@ async def claude_messages(
                 provider="zai",
                 model=requested_model,
                 source_info=source_info,
+                auth_token=bearer_token,
                 success=False,
                 started_at=started_at,
                 status_code=401,
@@ -442,6 +449,7 @@ async def claude_messages(
                 provider="zai",
                 model=requested_model,
                 source_info=source_info,
+                auth_token=bearer_token,
                 success=False,
                 started_at=started_at,
                 status_code=401,
@@ -461,6 +469,7 @@ async def claude_messages(
             provider="zai",
             model=requested_model,
             source_info=source_info,
+            auth_token=bearer_token,
             success=False,
             started_at=started_at,
             status_code=400,
@@ -477,6 +486,7 @@ async def claude_messages(
             provider="zai",
             model=openai_request.model,
             source_info=source_info,
+            auth_token=bearer_token,
             success=False,
             started_at=started_at,
             status_code=400,
@@ -504,6 +514,7 @@ async def claude_messages(
             provider="zai",
             model=openai_request.model,
             source_info=source_info,
+            auth_token=bearer_token,
             success=False,
             started_at=started_at,
             status_code=500,
@@ -519,6 +530,7 @@ async def claude_messages(
             provider="zai",
             model=openai_request.model,
             source_info=source_info,
+            auth_token=bearer_token,
             success=False,
             started_at=started_at,
             status_code=status_code,
@@ -536,6 +548,7 @@ async def claude_messages(
                 provider="zai",
                 model=openai_request.model,
                 source_info=source_info,
+                auth_token=bearer_token,
                 success=False,
                 started_at=started_at,
                 status_code=500,
@@ -558,6 +571,7 @@ async def claude_messages(
                 provider="zai",
                 model=openai_request.model,
                 source_info=source_info,
+                auth_token=bearer_token,
                 started_at=started_at,
                 input_tokens=input_tokens,
             ),
@@ -573,6 +587,7 @@ async def claude_messages(
             provider="zai",
             model=openai_request.model,
             source_info=source_info,
+            auth_token=bearer_token,
             success=False,
             started_at=started_at,
             status_code=500,
@@ -592,6 +607,7 @@ async def claude_messages(
         provider="zai",
         model=openai_request.model,
         source_info=source_info,
+        auth_token=bearer_token,
         success=True,
         started_at=started_at,
         status_code=200,

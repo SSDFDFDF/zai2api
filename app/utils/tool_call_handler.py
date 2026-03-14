@@ -150,7 +150,9 @@ You have access to the following available tools to help solve problems:
 1. You can call MULTIPLE tools in a single response if needed.
 2. Even though you can call multiple tools, you MUST respect the user's later constraints and preferences (e.g., the user may request no tools, only one tool, or a specific tool/workflow).
 3. The conversation context may already contain tool execution results from previous function calls. Review the conversation history carefully to avoid unnecessary duplicate tool calls.
-4. When tool execution results are present in the context, they will be formatted with XML tags like <tool_result>...</tool_result> for easy identification.
+4. Tool execution results from previous calls appear as <tool_response tool="...">...</tool_response>.
+   These are internal metadata — absorb the information and continue your task.
+   NEVER repeat, quote, or reference the raw tool response content in your output.
 5. This is the ONLY format you can use for tool calls, and any deviation will result in failure.
 
 When you need to use tools, you **MUST** strictly follow this format. Do NOT include any extra text, explanations, or dialogue on the first and second lines of the tool call syntax:
@@ -204,7 +206,7 @@ I will call the tools for you.
 Now please be ready to strictly follow the above specifications.
 """
 
-    logger.debug(f"生成 XML 工具提示词, 包含 {len(tools_list_str)} 个工具定义, 触发信号: {trigger_signal[:20]}...")
+    logger.debug("生成 XML 工具提示词, 包含 {} 个工具定义, 触发信号: {}...", len(tools_list_str), trigger_signal[:20])
     return prompt
 
 
@@ -232,7 +234,7 @@ def process_tool_choice(
         elif tool_choice == "required":
             return "\n\n**IMPORTANT:** You MUST call at least one tool in this response. Do not respond without using tools."
         else:
-            logger.warning(f"⚠️ 未知的 tool_choice 值: {tool_choice}")
+            logger.warning("⚠️ 未知的 tool_choice 值: {}", tool_choice)
             return ""
 
     # 处理 ToolChoice object: {"type": "function", "function": {"name": "xxx"}}
@@ -246,7 +248,7 @@ def process_tool_choice(
         else:
             required_tool_name = None
     else:
-        logger.warning(f"⚠️ 不支持的 tool_choice 类型: {type(tool_choice)}")
+        logger.warning("⚠️ 不支持的 tool_choice 类型: {}", type(tool_choice))
         return ""
 
     if required_tool_name and isinstance(required_tool_name, str):
@@ -314,7 +316,7 @@ def process_messages_with_tools(
         })
         processed.extend(messages)
 
-    logger.debug(f"XML 工具提示已注入到消息列表, 共 {len(processed)} 条消息")
+    logger.debug("XML 工具提示已注入到消息列表, 共 {} 条消息", len(processed))
     return processed
 
 
@@ -458,12 +460,12 @@ def normalize_cdata_markers(raw: str) -> str:
             # (?<!\]) 确保不会把已修复的 ]]> 再改一次
             raw = re.sub(r'(?<!\])\]>', ']]>', raw)
             logger.debug(
-                f"🔧 修复单括号 CDATA 终止符: "
-                f"open={open_count}, close_before={close_count}, close_after={raw.count(']]>')}"
+                "🔧 修复单括号 CDATA 终止符: open={}, close_before={}, close_after={}",
+                open_count, close_count, raw.count(']]>'),
             )
 
     if raw != original:
-        logger.debug(f"🔧 CDATA 标记已修复: {repr(original[:60])} → {repr(raw[:60])}")
+        logger.debug("🔧 CDATA 标记已修复: {} → {}", repr(original[:60]), repr(raw[:60]))
 
     return raw
 
@@ -508,7 +510,7 @@ def repair_json_payload(s: str) -> str:
     s = re.sub(r',\s*([}\]])', r'\1', s)
 
     if s != original:
-        logger.debug(f"🔧 JSON payload 已修复: {repr(original[:60])} → {repr(s[:60])}")
+        logger.debug("🔧 JSON payload 已修复: {} → {}", repr(original[:60]), repr(s[:60]))
 
     return s
 
@@ -648,7 +650,7 @@ def _extract_cdata_text(raw: str) -> str:
         # 移除可能出现在末尾的不完整终止符碎片
         # 覆盖: ]]>, ]>, ]], ] (从长到短匹配)
         tail = re.sub(r'\]\]?>?$', '', tail)
-        logger.debug(f"🔧 CDATA 流式截断恢复: 提取 {len(tail)} 字符")
+        logger.debug("🔧 CDATA 流式截断恢复: 提取 {} 字符", len(tail))
         return tail
     return raw
 
@@ -670,7 +672,7 @@ def repair_unclosed_cdata(xml_str: str) -> str:
     if missing <= 0:
         return xml_str
 
-    logger.debug(f"🔧 检测到 {missing} 个未闭合 CDATA, 自动补全终止符")
+    logger.debug("🔧 检测到 {} 个未闭合 CDATA, 自动补全终止符", missing)
 
     # 智能插入: 在最后一个未闭合 <![CDATA[ 之后，
     # 找第一个 </args_json> 或 </function_call> 或任意 </ 标签前插入
@@ -703,7 +705,7 @@ def parse_function_calls_xml(
     Returns:
         解析出的工具调用列表 [{"name": str, "args": dict}, ...] 或 None
     """
-    logger.debug(f"🔧 XML 解析开始, 输入长度: {len(xml_string) if xml_string else 0}")
+    logger.debug("🔧 XML 解析开始, 输入长度: {}", len(xml_string) if xml_string else 0)
 
     if not xml_string or trigger_signal not in xml_string:
         logger.debug("🔧 输入为空或不包含触发信号")
@@ -715,7 +717,7 @@ def parse_function_calls_xml(
     original_cleaned = cleaned_content
     cleaned_content = normalize_xml_structure(cleaned_content)
     if cleaned_content != original_cleaned:
-        logger.debug(f"🔧 XML 结构已修复 ({len(original_cleaned)} → {len(cleaned_content)} 字符)")
+        logger.debug("🔧 XML 结构已修复 ({} → {} 字符)", len(original_cleaned), len(cleaned_content))
 
     # 查找所有触发信号位置
     signal_positions = []
@@ -738,7 +740,7 @@ def parse_function_calls_xml(
         m = re.search(r"<function_calls>([\s\S]*?)</function_calls>", sub)
         if m:
             calls_content_match = m
-            logger.debug(f"🔧 使用触发信号 index {idx}, pos {pos}")
+            logger.debug("🔧 使用触发信号 index {}, pos {}", idx, pos)
             break
 
     if calls_content_match is None:
@@ -775,7 +777,7 @@ def parse_function_calls_xml(
                 payload = _extract_cdata_text(raw_text)
                 parsed_args = _parse_args_json_payload(payload)
                 if parsed_args is None:
-                    logger.debug(f"🔧 function_call #{i+1} 的 args_json 无效; 视为解析失败")
+                    logger.debug("🔧 function_call #{} 的 args_json 无效; 视为解析失败", i + 1)
                     return None
                 args = parsed_args
             else:
@@ -788,10 +790,10 @@ def parse_function_calls_xml(
             results.append({"name": name, "args": args})
 
         if results:
-            logger.debug(f"🔧 XML 解析结果 (ET): {len(results)} 个工具调用")
+            logger.debug("🔧 XML 解析结果 (ET): {} 个工具调用", len(results))
             return results
     except Exception as e:
-        logger.debug(f"🔧 XML 库解析失败, 降级到正则: {type(e).__name__}: {e}")
+        logger.debug("🔧 XML 库解析失败, 降级到正则: {}: {}", type(e).__name__, e)
 
     # 降级路径: 正则解析
     results = []
@@ -813,7 +815,7 @@ def parse_function_calls_xml(
             payload = _extract_cdata_text(raw_payload)
             parsed_args = _parse_args_json_payload(payload)
             if parsed_args is None:
-                logger.debug(f"🔧 function_call #{i+1} (正则) args_json 无效; 视为解析失败")
+                logger.debug("🔧 function_call #{} (正则) args_json 无效; 视为解析失败", i + 1)
                 return None
             args = parsed_args
         elif args_json_open != -1 and args_json_close == -1:
@@ -841,7 +843,7 @@ def parse_function_calls_xml(
 
         results.append({"name": name, "args": args})
 
-    logger.debug(f"🔧 正则解析结果: {len(results)} 个工具调用")
+    logger.debug("🔧 正则解析结果: {} 个工具调用", len(results))
     return results if results else None
 
 
@@ -1024,32 +1026,35 @@ class StreamingFunctionCallDetector:
             return False, ""
 
         self.content_buffer += delta_content
-        content_to_yield = ""
 
         if self.state == "tool_parsing":
             return False, ""
 
+        buf = self.content_buffer
+        buf_len = len(buf)
+        parts: list = []
         i = 0
-        while i < len(self.content_buffer):
+
+        while i < buf_len:
+            # --- think 标签处理 ---
             skip_chars = self._update_think_state(i)
             if skip_chars > 0:
-                for j in range(skip_chars):
-                    if i + j < len(self.content_buffer):
-                        content_to_yield += self.content_buffer[i + j]
-                i += skip_chars
+                end = min(i + skip_chars, buf_len)
+                parts.append(buf[i:end])
+                i = end
                 continue
 
             if not self.in_think_block:
-                # 主路径：严格匹配当前会话信号
-                if self._can_detect_signal_at(i):
-                    if self.content_buffer[i:i+self.signal_len] == self.signal:
-                        logger.debug("🔧 检测到触发信号 (非 think 块内), 切换到工具解析模式")
-                        self.state = "tool_parsing"
-                        self.content_buffer = self.content_buffer[i:]
-                        return True, content_to_yield
+                # --- 主路径：严格匹配当前会话信号 ---
+                if (i + self.signal_len <= buf_len
+                        and buf[i:i + self.signal_len] == self.signal):
+                    logger.debug("🔧 检测到触发信号 (非 think 块内), 切换到工具解析模式")
+                    self.state = "tool_parsing"
+                    self.content_buffer = buf[i:]
+                    return True, "".join(parts)
 
-                # 兜底：会话信号漂移时，允许匹配标准 Function 触发器格式
-                fallback = _FALLBACK_TRIGGER_RE.match(self.content_buffer, i)
+                # --- 兜底：会话信号漂移时，允许匹配标准 Function 触发器格式 ---
+                fallback = _FALLBACK_TRIGGER_RE.match(buf, i)
                 if fallback:
                     detected_signal = fallback.group(0)
                     if detected_signal != self.signal:
@@ -1063,34 +1068,62 @@ class StreamingFunctionCallDetector:
                         self.signal_len = len(detected_signal)
                     logger.debug("🔧 检测到触发信号(兜底匹配), 切换到工具解析模式")
                     self.state = "tool_parsing"
-                    self.content_buffer = self.content_buffer[i:]
-                    return True, content_to_yield
+                    self.content_buffer = buf[i:]
+                    return True, "".join(parts)
 
-            remaining_len = len(self.content_buffer) - i
+            # --- look-ahead 保留：尾部可能是不完整的标签/信号 ---
+            remaining_len = buf_len - i
             if remaining_len < self.signal_len or remaining_len < 8:
                 break
 
-            content_to_yield += self.content_buffer[i]
-            i += 1
+            # --- 批量跳转到下一个感兴趣的位置 ---
+            # 在 think 块内需找 <think> 和 </think>，在块外需找 <think>、信号首字符
+            search_start = i + 1
+            if self.in_think_block:
+                next_think_open = buf.find('<think>', search_start)
+                next_think_close = buf.find('</think>', search_start)
+                candidates = [c for c in (next_think_open, next_think_close) if c != -1]
+                next_pos = min(candidates) if candidates else -1
+            else:
+                # 找 <think> 或信号首字符，取最近的
+                next_think = buf.find('<think>', search_start)
+                next_signal = buf.find(self.signal[0], search_start) if self.signal else -1
+                candidates = [c for c in (next_think, next_signal) if c != -1]
+                next_pos = min(candidates) if candidates else -1
 
-        self.content_buffer = self.content_buffer[i:]
-        return False, content_to_yield
+            if next_pos == -1:
+                # 没有更多感兴趣位置，批量输出到 look-ahead 边界
+                safe_end = buf_len - max(self.signal_len, 8) + 1
+                if safe_end > i:
+                    parts.append(buf[i:safe_end])
+                    i = safe_end
+                else:
+                    break
+            else:
+                # 批量输出到目标位置前（但尊重 look-ahead 边界）
+                safe_end = min(next_pos, buf_len - max(self.signal_len, 8) + 1)
+                if safe_end > i:
+                    parts.append(buf[i:safe_end])
+                    i = safe_end
+                else:
+                    # next_pos 在 look-ahead 区域内，逐字符推进
+                    parts.append(buf[i])
+                    i += 1
+
+        self.content_buffer = buf[i:]
+        return False, "".join(parts)
 
     def _update_think_state(self, pos: int) -> int:
-        remaining = self.content_buffer[pos:]
-        if remaining.startswith('<think>'):
+        buf = self.content_buffer
+        if buf.startswith('<think>', pos):
             self.think_depth += 1
             self.in_think_block = True
             return 7
-        elif remaining.startswith('</think>'):
+        elif buf.startswith('</think>', pos):
             self.think_depth = max(0, self.think_depth - 1)
             self.in_think_block = self.think_depth > 0
             return 8
         return 0
-
-    def _can_detect_signal_at(self, pos: int) -> bool:
-        return (pos + self.signal_len <= len(self.content_buffer) and
-                not self.in_think_block)
 
     def flush(self) -> str:
         """流结束时刷出被 look-ahead 保留的剩余内容。
@@ -1140,23 +1173,6 @@ def looks_like_complete_function_calls(buf: str) -> bool:
 # ---------------------------------------------------------------------------
 # 工具调用结果格式化
 # ---------------------------------------------------------------------------
-
-def format_tool_result_for_ai(
-    tool_name: str,
-    tool_arguments: str,
-    result_content: str,
-) -> str:
-    """格式化工具执行结果供上游模型理解。"""
-    return (
-        f"Tool execution result:\n"
-        f"- Tool name: {tool_name}\n"
-        f"- Tool arguments: {tool_arguments}\n"
-        f"- Execution result:\n"
-        f"<tool_result>\n"
-        f"{result_content}\n"
-        f"</tool_result>"
-    )
-
 
 def format_assistant_tool_calls_for_ai(
     tool_calls: List[Dict[str, Any]],

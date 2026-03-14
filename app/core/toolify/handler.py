@@ -320,24 +320,10 @@ class ToolifyHandler:
     def _build_tool_call_chunks(
         self, ctx: ToolifyContext, parsed_tools: List[Dict[str, Any]]
     ) -> List[str]:
+        normalized = self._normalize_xml_tools(parsed_tools)
         chunks: List[str] = []
         sid = ctx.ensure_stream_id()
-        for i, tool in enumerate(parsed_tools):
-            name = str(tool.get("name") or "")
-            args = tool.get("args")
-            if not name:
-                continue
-            if not isinstance(args, dict):
-                args = {}
-            tc = {
-                "index": i,
-                "id": f"call_{uuid.uuid4().hex[:24]}",
-                "type": "function",
-                "function": {
-                    "name": name,
-                    "arguments": json.dumps(args, ensure_ascii=False),
-                },
-            }
+        for tc in normalized:
             sse = format_sse_chunk(
                 create_openai_chunk(sid, ctx.model, {"tool_calls": [tc]})
             )
@@ -353,27 +339,10 @@ class ToolifyHandler:
         if self.normalize_tool_calls_func:
             return self.normalize_tool_calls_func(raw_tool_calls, start_index)
 
-        if not raw_tool_calls:
-            return []
-
-        tool_calls = raw_tool_calls if isinstance(raw_tool_calls, list) else [raw_tool_calls]
-        normalized: List[Dict[str, Any]] = []
-        for offset, tool_call in enumerate(tool_calls):
-            if not isinstance(tool_call, dict):
-                continue
-            function_data = tool_call.get("function") or {}
-            normalized.append(
-                {
-                    "index": tool_call.get("index", start_index + offset),
-                    "id": tool_call.get("id") or f"call_{uuid.uuid4().hex[:24]}",
-                    "type": "function",
-                    "function": {
-                        "name": function_data.get("name", ""),
-                        "arguments": function_data.get("arguments", ""),
-                    },
-                }
-            )
-        return normalized
+        raise RuntimeError(
+            "ToolifyHandler._normalize_tool_calls called without "
+            "normalize_tool_calls_func; caller must inject the delegate"
+        )
 
     @staticmethod
     def _normalize_xml_tools(parsed_tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

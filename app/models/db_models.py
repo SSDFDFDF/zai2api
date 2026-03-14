@@ -60,6 +60,7 @@ class RequestLog(Base):
     source = mapped_column(String, nullable=False, default="unknown", server_default=text("'unknown'"))
     protocol = mapped_column(String, nullable=False, default="unknown", server_default=text("'unknown'"))
     client_name = mapped_column(String, nullable=False, default="Unknown", server_default=text("'Unknown'"))
+    auth_token = mapped_column(Text, nullable=True)
     model = mapped_column(String, nullable=False)
     status_code = mapped_column(Integer, nullable=False, default=200, server_default=text("200"))
     success = mapped_column(Boolean, nullable=False)

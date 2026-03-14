@@ -438,9 +438,9 @@ class UpstreamClient:
                     )
                     return parsed_models
                 else:
-                    self.logger.warning(f"获取在线模型失败，状态码: {response.status_code}")
+                    self.logger.warning("获取在线模型失败，状态码: {}", response.status_code)
             except Exception as exc:
-                self.logger.warning(f"获取在线模型异常: {exc}")
+                self.logger.warning("获取在线模型异常: {}", exc)
 
         return self._online_models or []
 
@@ -454,7 +454,7 @@ class UpstreamClient:
             await dao.set(self._MODELS_CACHE_KEY, json.dumps(models, ensure_ascii=False))
             self.logger.debug("在线模型缓存已写入数据库")
         except Exception as exc:
-            self.logger.warning(f"在线模型缓存写入数据库失败: {exc}")
+            self.logger.warning("在线模型缓存写入数据库失败: {}", exc)
 
     async def load_cached_models(self) -> bool:
         """从数据库加载缓存的在线模型数据，成功返回 True。"""
@@ -476,7 +476,7 @@ class UpstreamClient:
             )
             return True
         except Exception as exc:
-            self.logger.warning(f"从数据库加载在线模型缓存失败: {exc}")
+            self.logger.warning("从数据库加载在线模型缓存失败: {}", exc)
             return False
 
     def get_supported_models(self) -> List[str]:
@@ -528,7 +528,7 @@ class UpstreamClient:
                             "guest_user_id": user_id,
                         }
 
-                    self.logger.warning(f"响应中未找到 token 字段: {data}")
+                    self.logger.warning("响应中未找到 token 字段: {}", data)
                 elif response.status_code == 405:
                     self.logger.error(
                         "🚫 请求被 WAF 拦截 (405)，无法直连获取匿名令牌"
@@ -579,7 +579,7 @@ class UpstreamClient:
             token = await token_pool.get_next_token(exclude_tokens=excluded_tokens)
             if token:
                 user_id = extract_user_id_from_token(token)
-                self.logger.debug(f"从认证号池获取令牌: {token[:20]}...")
+                self.logger.debug("从认证号池获取令牌: {}...", token[:20])
                 return {
                     "token": token,
                     "user_id": user_id,
@@ -609,7 +609,7 @@ class UpstreamClient:
                         "guest_user_id": session.user_id,
                     }
                 except Exception as exc:
-                    self.logger.warning(f"匿名会话池获取失败，转为直连访客鉴权: {exc}")
+                    self.logger.warning("匿名会话池获取失败，转为直连访客鉴权: {}", exc)
 
             return await self._fetch_direct_guest_auth()
 
@@ -677,7 +677,7 @@ class UpstreamClient:
         excluded_guest_user_ids: Optional[Set[str]] = None,
     ) -> Dict[str, Any]:
         """转换 OpenAI 请求为上游格式。"""
-        self.logger.debug(f"🔄 转换 OpenAI 请求到上游格式: {request.model}")
+        self.logger.debug("🔄 转换 OpenAI 请求到上游格式: {}", request.model)
 
         auth_info: Optional[Dict[str, Any]] = None  # 用于 finally 中 guest session 清理
 
@@ -942,9 +942,9 @@ class UpstreamClient:
             request: OpenAI 请求对象。
             http_request: FastAPI Request 对象，用于检测客户端断开。
         """
-        self.logger.debug(f"🔄 {self.name} 处理请求: {request.model}")
-        self.logger.debug(f"  消息数量: {len(request.messages)}")
-        self.logger.debug(f"  流式模式: {request.stream}")
+        self.logger.debug("🔄 {} 处理请求: {}", self.name, request.model)
+        self.logger.debug("  消息数量: {}", len(request.messages))
+        self.logger.debug("  流式模式: {}", request.stream)
 
         try:
             transformed = await self.transform_request(request)
@@ -1016,8 +1016,8 @@ class UpstreamClient:
                                 Exception(error_message or "上游认证会话不可用"),
                             )
                             self.logger.warning(
-                                "⚠️ 认证会话不可用，准备切换认证 Token/回退匿名池: "
-                                f"{current_token[:20]}..."
+                                "⚠️ 认证会话不可用，准备切换认证 Token/回退匿名池: {}...",
+                                current_token[:20],
                             )
                         transformed = await self._refresh_authenticated_request(
                             request,
@@ -1037,7 +1037,7 @@ class UpstreamClient:
                                     Exception(error_message or error_msg),
                                 )
                         await self._release_guest_session(transformed)
-                        self.logger.error(f"❌ {self.name} 响应失败: {error_msg}")
+                        self.logger.error("❌ {} 响应失败: {}", self.name, error_msg)
                         return handle_error(Exception(error_message or error_msg))
 
                     await self._commit_session_if_needed(transformed)
@@ -1058,7 +1058,7 @@ class UpstreamClient:
                     return result
 
         except Exception as e:
-            self.logger.error(f"❌ {self.name} 响应失败: {str(e)}")
+            self.logger.error("❌ {} 响应失败: {}", self.name, str(e))
             try:
                 await self._release_guest_session(transformed)
             except Exception:

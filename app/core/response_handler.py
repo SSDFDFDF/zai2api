@@ -54,6 +54,9 @@ class StreamContext:
     # 流 ID
     stream_id: Optional[str] = None
 
+    # 时间戳缓存（整条流共用一个 created）
+    created_at: Optional[int] = None
+
     # 内容累积
     buffered_content: str = ""
 
@@ -114,33 +117,39 @@ class StreamContext:
                 chunk_data.get("id") if isinstance(chunk_data, dict) else None
             )
             self.stream_id = upstream_id or f"chatcmpl-{uuid.uuid4().hex[:12]}"
+            self.created_at = int(time.time())
         return self.stream_id
 
     def log_downstream(self, sse_data: str) -> None:
         """记录下游 SSE 调试日志。"""
         self.downstream_count += 1
         logger.debug(
-            f"\U0001f4e4 Client SSE #{self.downstream_count}: "
-            f"{sse_data.rstrip()}"
+            "\U0001f4e4 Client SSE #{}: {}",
+            self.downstream_count,
+            sse_data.rstrip(),
         )
 
     def process_citation_marker(self, text: str) -> str:
         """过滤 GLM 内部引用标记 (如 【turn9click0】)。
 
-        逐字符处理，遇到 `【` 开始缓冲，匹配完整引用标记后丢弃，
-        超长或不匹配时退还缓冲。
+        批量处理无标记区域，仅对标记区域做精细处理。
         """
         if not text and not self.citation_buf:
             return text
 
+        # 快速路径：无残留缓冲且文本中无引用标记起始符
+        if not self.citation_buf and "【" not in text:
+            return text
+
         res_parts: List[str] = []
-        for char in text:
-            if not self.citation_buf:
-                if char == "【":
-                    self.citation_buf = char
-                else:
-                    res_parts.append(char)
-            else:
+        i = 0
+        text_len = len(text)
+
+        # 先处理跨 chunk 的残留缓冲
+        if self.citation_buf:
+            while i < text_len:
+                char = text[i]
+                i += 1
                 self.citation_buf += char
                 if self.citation_buf.endswith("】"):
                     if _CITATION_MARKER_RE.match(self.citation_buf):
@@ -148,15 +157,60 @@ class StreamContext:
                     else:
                         res_parts.append(self.citation_buf)
                         self.citation_buf = ""
+                    break
                 elif len(self.citation_buf) > 30:
                     res_parts.append(self.citation_buf)  # 超长，退还
                     self.citation_buf = ""
+                    break
                 elif (
                     not "【turn".startswith(self.citation_buf)
                     and not self.citation_buf.startswith("【turn")
                 ):
                     res_parts.append(self.citation_buf)  # 偏离特征，退还
                     self.citation_buf = ""
+                    break
+
+        # 批量处理剩余文本
+        while i < text_len:
+            next_mark = text.find("【", i)
+            if next_mark == -1:
+                # 无更多标记，批量追加剩余
+                res_parts.append(text[i:])
+                break
+
+            # 追加标记前的内容
+            if next_mark > i:
+                res_parts.append(text[i:next_mark])
+
+            # 从 【 开始精细处理
+            self.citation_buf = "【"
+            i = next_mark + 1
+            while i < text_len:
+                char = text[i]
+                i += 1
+                self.citation_buf += char
+                if self.citation_buf.endswith("】"):
+                    if _CITATION_MARKER_RE.match(self.citation_buf):
+                        self.citation_buf = ""  # 完整引用标记，丢弃
+                    else:
+                        res_parts.append(self.citation_buf)
+                        self.citation_buf = ""
+                    break
+                elif len(self.citation_buf) > 30:
+                    res_parts.append(self.citation_buf)
+                    self.citation_buf = ""
+                    break
+                elif (
+                    not "【turn".startswith(self.citation_buf)
+                    and not self.citation_buf.startswith("【turn")
+                ):
+                    res_parts.append(self.citation_buf)
+                    self.citation_buf = ""
+                    break
+            else:
+                # text 结束但 citation_buf 仍在缓冲中（跨 chunk），保持
+                break
+
         return "".join(res_parts)
 
 
@@ -382,7 +436,10 @@ class ResponseHandler:
             output.append(role_sse)
 
         sse = format_sse_chunk(
-            create_openai_chunk(ctx.ensure_stream_id(), ctx.model, delta)
+            create_openai_chunk(
+                ctx.ensure_stream_id(), ctx.model, delta,
+                created=ctx.created_at,
+            )
         )
         ctx.log_downstream(sse)
         output.append(sse)
@@ -398,6 +455,7 @@ class ResponseHandler:
                 ctx.ensure_stream_id(),
                 ctx.model,
                 {"role": "assistant"},
+                created=ctx.created_at,
             )
         )
         ctx.log_downstream(role_sse)
@@ -533,13 +591,13 @@ class ResponseHandler:
         data_usage = data.get("usage")
         if data_usage and data_usage != ctx.usage_info:
             ctx.usage_info = data_usage
-            self.logger.debug("[usage] catch data.usage: {}", ctx.usage_info)
+            self.logger.info("[usage] catch data.usage: {}", ctx.usage_info)
             return
 
         chunk_usage = chunk.get("usage")
         if chunk_usage and chunk_usage != ctx.usage_info:
             ctx.usage_info = chunk_usage
-            self.logger.debug("[usage] catch chunk.usage: {}", ctx.usage_info)
+            self.logger.info("[usage] catch chunk.usage: {}", ctx.usage_info)
 
     # ==================================================================
     # 流式处理: 内容累积
@@ -698,10 +756,10 @@ class ResponseHandler:
             return None
 
         self.logger.warning(
-            f"⚠️ 检测到模型重复循环! "
-            f"模式: {repeated_pattern[:30]!r}, "
-            f"已处理 {ctx.line_count} 行/{ctx.repeat_chunk_count} chunks, "
-            f"强制终止流"
+            "⚠️ 检测到模型重复循环! 模式: {!r}, 已处理 {} 行/{} chunks, 强制终止流",
+            repeated_pattern[:30],
+            ctx.line_count,
+            ctx.repeat_chunk_count,
         )
         error_msg = (
             "\n\n[ERROR: Model output repetition loop detected, "
@@ -815,8 +873,8 @@ class ResponseHandler:
             # 跳过 GLM 内部工具执行期间的 other 阶段内容
             if ctx.in_glm_tool_execution and phase != "answer":
                 self.logger.debug(
-                    f"🧹 跳过 GLM 工具执行期 other 内容: "
-                    f"{current_text[:60]}..."
+                    "🧹 跳过 GLM 工具执行期 other 内容: {}...",
+                    current_text[:60],
                 )
             else:
                 filtered_text = ctx.process_citation_marker(current_text)
@@ -863,6 +921,7 @@ class ResponseHandler:
                         ctx.ensure_stream_id(),
                         ctx.model,
                         {"content": ctx.citation_buf},
+                        created=ctx.created_at,
                     )
                 )
                 ctx.log_downstream(sse)
@@ -886,6 +945,7 @@ class ResponseHandler:
                         ctx.ensure_stream_id(),
                         ctx.model,
                         {"content": remaining},
+                        created=ctx.created_at,
                     )
                 )
                 ctx.log_downstream(sse)
@@ -894,7 +954,8 @@ class ResponseHandler:
         # finish chunk
         finish_reason = "tool_calls" if ctx.tool_calls_accum else "stop"
         finish_chunk = create_openai_chunk(
-            ctx.ensure_stream_id(), ctx.model, {}, finish_reason
+            ctx.ensure_stream_id(), ctx.model, {}, finish_reason,
+            created=ctx.created_at,
         )
         finish_chunk["usage"] = ctx.usage_info
         finish_sse = format_sse_chunk(finish_chunk)
@@ -924,8 +985,8 @@ class ResponseHandler:
         if start_time:
             ttfb = time.perf_counter() - start_time
             self.logger.info(
-                f"[stream] upstream success, start handle SSE stream, "
-                f"ttfb: {ttfb:.3f}s"
+                "[stream] upstream success, start handle SSE stream, ttfb: {:.3f}s",
+                ttfb,
             )
         else:
             self.logger.info(
@@ -1030,7 +1091,8 @@ class ResponseHandler:
                         # 解析完成, 自带结流
                         ctx.finished = True
                         finish_chunk = create_openai_chunk(
-                            ctx.ensure_stream_id(), ctx.model, {}, "tool_calls"
+                            ctx.ensure_stream_id(), ctx.model, {}, "tool_calls",
+                            created=ctx.created_at,
                         )
                         finish_chunk["usage"] = ctx.usage_info
                         finish_sse = format_sse_chunk(finish_chunk)
@@ -1057,11 +1119,12 @@ class ResponseHandler:
                     yield final_chunk
 
         except Exception as e:
-            self.logger.error(f"❌ 流式响应处理错误: {e}")
+            self.logger.error("❌ 流式响应处理错误: {}", e)
             if not ctx.finished:
                 yield format_sse_chunk(
                     create_openai_chunk(
-                        ctx.ensure_stream_id(), model, {}, "stop"
+                        ctx.ensure_stream_id(), model, {}, "stop",
+                        created=ctx.created_at,
                     )
                 )
                 yield "data: [DONE]\n\n"
