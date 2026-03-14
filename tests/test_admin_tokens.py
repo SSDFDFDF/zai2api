@@ -1,3 +1,4 @@
+from html.parser import HTMLParser
 from urllib.parse import urlencode
 
 import pytest
@@ -39,6 +40,71 @@ def _make_form_request(path: str, data: dict[str, str] | None = None) -> Request
         "server": ("testserver", 80),
     }
     return Request(scope, receive)
+
+
+def _make_request(path: str, method: str = "GET") -> Request:
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    scope = {
+        "type": "http",
+        "http_version": "1.1",
+        "method": method,
+        "scheme": "http",
+        "path": path,
+        "raw_path": path.encode(),
+        "query_string": b"",
+        "headers": [],
+        "client": ("testclient", 50000),
+        "server": ("testserver", 80),
+    }
+    return Request(scope, receive)
+
+
+class _TokenModalStructureParser(HTMLParser):
+    _VOID_TAGS = {
+        "area",
+        "base",
+        "br",
+        "col",
+        "embed",
+        "hr",
+        "img",
+        "input",
+        "link",
+        "meta",
+        "param",
+        "source",
+        "track",
+        "wbr",
+    }
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._stack: list[tuple[str, bool]] = []
+        self.modal_inside_list_tab: dict[str, bool] = {
+            "showAddModal": False,
+            "showValidateModal": False,
+        }
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attr_map = dict(attrs)
+        x_show = attr_map.get("x-show")
+        inside_list_tab = any(is_list_tab for _, is_list_tab in self._stack)
+
+        if x_show in self.modal_inside_list_tab:
+            self.modal_inside_list_tab[x_show] = inside_list_tab
+
+        is_list_tab = x_show == "activeTab === 'list'"
+        if tag not in self._VOID_TAGS:
+            self._stack.append((tag, is_list_tab))
+
+    def handle_endtag(self, tag: str) -> None:
+        for index in range(len(self._stack) - 1, -1, -1):
+            current_tag, _ = self._stack[index]
+            self._stack.pop()
+            if current_tag == tag:
+                break
 
 
 @pytest.mark.asyncio
@@ -152,3 +218,29 @@ def test_tokens_template_compiles():
     template = env.get_template("tokens.html")
 
     assert template is not None
+
+
+def test_tokens_template_modals_are_not_nested_in_list_tab():
+    env = Environment(loader=FileSystemLoader("app/templates"))
+    template = env.get_template("tokens.html")
+
+    rendered = template.render(
+        request=_make_request("/admin/tokens"),
+        automation={
+            "config_url": "/admin/config#tokens",
+            "import_enabled": False,
+            "import_source_dir": "",
+            "import_interval": 300,
+            "has_import_source_dir": False,
+            "maintenance_enabled": False,
+            "maintenance_interval": 300,
+            "maintenance_actions": [],
+            "has_maintenance_actions": False,
+        },
+    )
+
+    parser = _TokenModalStructureParser()
+    parser.feed(rendered)
+
+    assert parser.modal_inside_list_tab["showAddModal"] is False
+    assert parser.modal_inside_list_tab["showValidateModal"] is False
