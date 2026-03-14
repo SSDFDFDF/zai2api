@@ -1073,8 +1073,23 @@ class ResponseHandler:
                     GLMToolHandler.accumulate_delta(ctx, data)
 
                 # GLM native tool_calls 提取（tool_call 阶段结束时触发）
-                for sse in self.glm_tool_handler.handle_native_extraction(ctx):
-                    yield sse
+                glm_extracted = list(self.glm_tool_handler.handle_native_extraction(ctx))
+                if glm_extracted:
+                    for sse in glm_extracted:
+                        yield sse
+                    # 提取到工具调用后立即终止流，让客户端执行工具
+                    ctx.finished = True
+                    finish_chunk = create_openai_chunk(
+                        ctx.ensure_stream_id(), ctx.model, {}, "tool_calls",
+                        created=ctx.created_at,
+                    )
+                    finish_chunk["usage"] = ctx.usage_info
+                    finish_sse = format_sse_chunk(finish_chunk)
+                    ctx.log_downstream(finish_sse)
+                    yield finish_sse
+                    ctx.log_downstream("data: [DONE]")
+                    yield "data: [DONE]\n\n"
+                    return
 
                 # 上游原生 tool_calls 透传（disabled 时跳过）
                 if ctx.tool_strategy != "disabled":
