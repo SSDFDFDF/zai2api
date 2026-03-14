@@ -110,6 +110,9 @@ class StreamContext:
     # GLM native tool_calls: tool_call 阶段结束后待解析标记
     glm_tool_calls_pending: bool = False
 
+    # GLM delta 流式工具调用累积 (delta_name / delta_arguments 格式)
+    glm_delta_tool_calls: List[Dict[str, Any]] = field(default_factory=list)
+
     # ------------------------------------------------------------------
     # 辅助方法
     # ------------------------------------------------------------------
@@ -922,6 +925,16 @@ class ResponseHandler:
             for sse in self.toolify_handler.finalize_stream_tool_calls(ctx):
                 yield sse
 
+        # glmnative: 流结束前刷出未处理的 delta 工具调用
+        if (
+            ctx.has_tools
+            and ctx.tool_strategy == "glmnative"
+            and (ctx.glm_delta_tool_calls or ctx.glm_tool_calls_pending)
+        ):
+            ctx.glm_tool_calls_pending = True
+            for sse in self.glm_tool_handler.handle_native_extraction(ctx):
+                yield sse
+
         # 确保 role 已发送
         role_sse = self._ensure_role_sse(ctx)
         if role_sse:
@@ -1054,6 +1067,10 @@ class ResponseHandler:
 
                 # 累积内容
                 current_text = self._accumulate_content(ctx, data)
+
+                # GLM delta 流式工具调用累积 (glmnative)
+                if ctx.tool_strategy == "glmnative":
+                    GLMToolHandler.accumulate_delta(ctx, data)
 
                 # GLM native tool_calls 提取（tool_call 阶段结束时触发）
                 for sse in self.glm_tool_handler.handle_native_extraction(ctx):
@@ -1192,6 +1209,7 @@ class ResponseHandler:
 
         in_glm_tool_execution = False
         last_phase = None
+        glm_delta_accum: List[Dict[str, Any]] = []
 
         try:
             async for line in response.aiter_lines():
@@ -1310,6 +1328,19 @@ class ResponseHandler:
                         )
                     )
 
+                # glmnative: 累积 delta_name / delta_arguments
+                if tool_strategy == "glmnative":
+                    delta_name = data.get("delta_name", "")
+                    delta_args = data.get("delta_arguments", "")
+                    if delta_name:
+                        metadata = data.get("metadata", {})
+                        call_id = metadata.get("tool_call_id") or f"call_{uuid.uuid4().hex[:24]}"
+                        glm_delta_accum.append({
+                            "id": call_id, "name": delta_name, "arguments": delta_args,
+                        })
+                    elif delta_args and glm_delta_accum:
+                        glm_delta_accum[-1]["arguments"] += delta_args
+
                 if data.get("usage"):
                     usage_info = data["usage"]
                 elif chunk.get("usage"):
@@ -1336,9 +1367,24 @@ class ResponseHandler:
             and tool_strategy == "glmnative"
         ):
             allowed = GLMToolHandler._extract_tool_names(tools_defs)
+            # 1. <glm_block> 提取
             glm_tool_calls = GLMToolHandler.parse_tool_calls(
                 final_content, allowed_names=allowed,
             )
+            # 2. delta 累积提取
+            for entry in glm_delta_accum:
+                name = entry.get("name", "")
+                if allowed is not None and name not in allowed:
+                    continue
+                glm_tool_calls.append({
+                    "index": len(glm_tool_calls),
+                    "id": entry.get("id", f"call_{uuid.uuid4().hex[:24]}"),
+                    "type": "function",
+                    "function": {
+                        "name": name,
+                        "arguments": entry.get("arguments", "{}"),
+                    },
+                })
             if glm_tool_calls:
                 self.logger.info(
                     "[glm-native] 非流式提取 {} 个工具调用",

@@ -5,7 +5,7 @@
 
 负责：
 1. 工具执行时向客户端发送可视化的开始与完成提示（hint）。
-2. native/hybrid 策略下，从 <glm_block> 中提取工具调用并转为 OpenAI tool_calls 格式。
+2. glmnative 策略下，从 <glm_block> 和 delta_name/delta_arguments 中提取工具调用并转为 OpenAI tool_calls 格式。
 """
 
 import json
@@ -208,8 +208,58 @@ class GLMToolHandler:
                 names.add(func["name"])
         return names or None
 
+    # ------------------------------------------------------------------
+    # glmnative: delta_name / delta_arguments 流式累积
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def accumulate_delta(ctx: Any, data: Dict[str, Any]) -> None:
+        """在 tool_call 阶段累积 delta_name / delta_arguments 流式片段。
+
+        GLM 的 delta 格式:
+        - 首个 chunk: delta_name="ToolName", delta_arguments="{\"", metadata.tool_call_id="call_xxx"
+        - 后续 chunks: delta_arguments="..." (增量)
+        - 阶段结束: phase 切换到 thinking/answer
+
+        仅在 glmnative 策略 + tool_call 阶段调用。
+        """
+        if ctx.last_phase != "tool_call":
+            return
+
+        delta_name = data.get("delta_name", "")
+        delta_args = data.get("delta_arguments", "")
+
+        if not delta_name and not delta_args:
+            return
+
+        # 新工具调用开始 (有 delta_name)
+        if delta_name:
+            metadata = data.get("metadata", {})
+            call_id = metadata.get("tool_call_id", "")
+            if not call_id:
+                call_id = f"call_{uuid.uuid4().hex[:24]}"
+            ctx.glm_delta_tool_calls.append({
+                "id": call_id,
+                "name": delta_name,
+                "arguments": delta_args,
+            })
+            logger.debug(
+                "[glm-delta] 新工具调用: name={}, id={}", delta_name, call_id,
+            )
+        elif delta_args and ctx.glm_delta_tool_calls:
+            # 追加到最后一个工具调用的 arguments
+            ctx.glm_delta_tool_calls[-1]["arguments"] += delta_args
+
+    # ------------------------------------------------------------------
+    # glmnative: <glm_block> + delta → OpenAI tool_calls
+    # ------------------------------------------------------------------
+
     def handle_native_extraction(self, ctx: Any) -> List[str]:
-        """native/hybrid 模式下，tool_call 阶段结束后提取 GLM 工具调用。
+        """glmnative 模式下，tool_call 阶段结束后提取 GLM 工具调用。
+
+        支持两种 GLM 工具调用格式:
+        1. <glm_block> 格式 — 从 buffered_content 中解析
+        2. delta_name/delta_arguments 流式格式 — 从 glm_delta_tool_calls 中提取
 
         仅提取客户端请求中声明的工具，跳过 GLM 内部工具（如 search、browser）。
         """
@@ -218,13 +268,22 @@ class GLMToolHandler:
         ctx.glm_tool_calls_pending = False
 
         allowed = self._extract_tool_names(ctx.tools_defs)
-        tool_calls = self.parse_tool_calls(ctx.buffered_content, allowed_names=allowed)
+        tool_calls: List[Dict[str, Any]] = []
+
+        # 1. 从 <glm_block> 提取
+        block_calls = self.parse_tool_calls(ctx.buffered_content, allowed_names=allowed)
+        tool_calls.extend(block_calls)
+
+        # 2. 从 delta 累积提取
+        delta_calls = self._flush_delta_tool_calls(ctx, allowed)
+        tool_calls.extend(delta_calls)
+
         if not tool_calls:
             return []
 
         logger.info(
-            "[glm-native] 从 buffered_content 提取 {} 个工具调用",
-            len(tool_calls),
+            "[glm-native] 提取 {} 个工具调用 (block={}, delta={})",
+            len(tool_calls), len(block_calls), len(delta_calls),
         )
         ctx.tool_calls_accum.extend(tool_calls)
         output: List[str] = []
@@ -233,3 +292,34 @@ class GLMToolHandler:
                 self.emit_func(ctx, {"tool_calls": [tc]})
             )
         return output
+
+    @staticmethod
+    def _flush_delta_tool_calls(
+        ctx: Any,
+        allowed: Optional[set],
+    ) -> List[Dict[str, Any]]:
+        """将 ctx.glm_delta_tool_calls 转为 OpenAI tool_calls 格式并清空。"""
+        if not ctx.glm_delta_tool_calls:
+            return []
+
+        raw = ctx.glm_delta_tool_calls
+        ctx.glm_delta_tool_calls = []
+
+        tool_calls: List[Dict[str, Any]] = []
+        for entry in raw:
+            name = entry.get("name", "")
+            if allowed is not None and name not in allowed:
+                logger.debug(
+                    "[glm-delta] 跳过非客户端请求的工具: {}", name,
+                )
+                continue
+            tool_calls.append({
+                "index": len(tool_calls),
+                "id": entry.get("id", f"call_{uuid.uuid4().hex[:24]}"),
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "arguments": entry.get("arguments", "{}"),
+                },
+            })
+        return tool_calls
