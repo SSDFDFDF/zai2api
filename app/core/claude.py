@@ -504,10 +504,14 @@ async def claude_messages(
 
     msg_id = make_claude_id()
     input_tokens = _estimate_tokens(_build_prompt_text(body))
+    upstream_auth_token: Optional[str] = None
 
     try:
         client = get_upstream_client()
-        result = await client.chat_completion(openai_request, http_request=request)
+        result, upstream_auth_token = await client.chat_completion(
+            openai_request,
+            http_request=request,
+        )
     except Exception as exc:
         logger.error(f"{source_prefix} ❌ Claude 请求处理失败: {exc}")
         await write_request_log(
@@ -515,6 +519,7 @@ async def claude_messages(
             model=openai_request.model,
             source_info=source_info,
             auth_token=bearer_token,
+            upstream_auth_token=None,
             success=False,
             started_at=started_at,
             status_code=500,
@@ -531,6 +536,7 @@ async def claude_messages(
             model=openai_request.model,
             source_info=source_info,
             auth_token=bearer_token,
+            upstream_auth_token=upstream_auth_token,
             success=False,
             started_at=started_at,
             status_code=status_code,
@@ -549,6 +555,7 @@ async def claude_messages(
                 model=openai_request.model,
                 source_info=source_info,
                 auth_token=bearer_token,
+                upstream_auth_token=upstream_auth_token,
                 success=False,
                 started_at=started_at,
                 status_code=500,
@@ -572,6 +579,7 @@ async def claude_messages(
                 model=openai_request.model,
                 source_info=source_info,
                 auth_token=bearer_token,
+                upstream_auth_token=upstream_auth_token,
                 started_at=started_at,
                 input_tokens=input_tokens,
             ),
@@ -588,6 +596,7 @@ async def claude_messages(
             model=openai_request.model,
             source_info=source_info,
             auth_token=bearer_token,
+            upstream_auth_token=upstream_auth_token,
             success=False,
             started_at=started_at,
             status_code=500,
@@ -608,6 +617,7 @@ async def claude_messages(
         model=openai_request.model,
         source_info=source_info,
         auth_token=bearer_token,
+        upstream_auth_token=upstream_auth_token,
         success=True,
         started_at=started_at,
         status_code=200,

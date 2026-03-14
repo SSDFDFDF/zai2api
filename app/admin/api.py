@@ -33,6 +33,7 @@ from app.admin.stats import collect_admin_stats, normalize_trend_window
 from app.services.request_log_dao import get_request_log_dao
 from app.utils.format import format_compact_number
 from app.utils.logger import logger
+from app.utils.utlis import mask_token
 
 router = APIRouter(prefix="/admin/api", tags=["admin-api"])
 templates = Jinja2Templates(directory="app/templates")
@@ -445,7 +446,10 @@ async def get_recent_logs(request: Request):
                     str(row.get("protocol") or "unknown")
                 ),
                 "client_name": client_name,
-                "auth_token": str(row.get("auth_token") or ""),
+                "auth_token_display": mask_token(str(row.get("auth_token") or "")),
+                "upstream_auth_token_display": mask_token(
+                    str(row.get("upstream_auth_token") or "")
+                ),
                 "success": success,
                 "status_code": status_code,
                 "duration_display": f"{duration_value:.2f}s",

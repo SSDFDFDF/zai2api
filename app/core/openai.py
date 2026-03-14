@@ -93,6 +93,7 @@ async def chat_completions(
         len(body.tools) if body.tools else 0,
     )
     logger.debug("{} 客户端请求原样数据: {}", source_prefix, body)
+    upstream_auth_token: Optional[str] = None
 
     try:
         if not settings.SKIP_AUTH_TOKEN:
@@ -103,7 +104,10 @@ async def chat_completions(
                 raise HTTPException(status_code=401, detail="Invalid API key")
 
         client = get_upstream_client()
-        result = await client.chat_completion(body, http_request=http_request)
+        result, upstream_auth_token = await client.chat_completion(
+            body,
+            http_request=http_request,
+        )
 
         if isinstance(result, dict) and "error" in result:
             error_info = result["error"]
@@ -121,6 +125,7 @@ async def chat_completions(
                         model=body.model,
                         source_info=source_info,
                         auth_token=bearer_token,
+                        upstream_auth_token=upstream_auth_token,
                         started_at=started_at,
                     ),
                     media_type="text/event-stream",
@@ -141,6 +146,7 @@ async def chat_completions(
                 model=body.model,
                 source_info=source_info,
                 auth_token=bearer_token,
+                upstream_auth_token=upstream_auth_token,
                 success="error" not in result,
                 started_at=started_at,
                 status_code=200 if "error" not in result else 500,
@@ -166,6 +172,7 @@ async def chat_completions(
             model=body.model,
             source_info=source_info,
             auth_token=bearer_token,
+            upstream_auth_token=upstream_auth_token,
             success=False,
             started_at=started_at,
             status_code=exc.status_code,
@@ -179,6 +186,7 @@ async def chat_completions(
             model=body.model,
             source_info=source_info,
             auth_token=bearer_token,
+            upstream_auth_token=upstream_auth_token,
             success=False,
             started_at=started_at,
             status_code=500,

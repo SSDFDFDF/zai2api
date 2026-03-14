@@ -13,6 +13,7 @@ from app.services.request_log_dao import get_request_log_dao
 from app.utils.format import format_compact_number
 from app.utils.logger import get_logger
 from app.utils.request_source import RequestSourceInfo
+from app.utils.utlis import mask_token
 
 logger = get_logger()
 
@@ -203,6 +204,7 @@ async def write_request_log(
     model: str,
     source_info: RequestSourceInfo,
     auth_token: Optional[str] = None,
+    upstream_auth_token: Optional[str] = None,
     success: bool,
     started_at: float,
     status_code: int = 200,
@@ -220,9 +222,16 @@ async def write_request_log(
     status_icon = "✓" if success else "✗"
     in_tokens = format_compact_number(input_tokens)
     out_tokens = format_compact_number(output_tokens)
-    auth_segment = f" | Auth: {auth_token}" if auth_token else ""
+    masked_auth_token = mask_token(auth_token)
+    masked_upstream_auth_token = mask_token(upstream_auth_token)
+    auth_segment = f" | Auth: {masked_auth_token}" if masked_auth_token else ""
+    upstream_auth_segment = (
+        f" | Upstream Auth: {masked_upstream_auth_token}"
+        if masked_upstream_auth_token
+        else ""
+    )
     logger.info(
-        f"{status_icon} [{provider}] {model}{auth_segment} | In: {in_tokens} | Out: {out_tokens} | {duration:.2f}s"
+        f"{status_icon} [{provider}] {model}{auth_segment}{upstream_auth_segment} | In: {in_tokens} | Out: {out_tokens} | {duration:.2f}s"
     )
 
     try:
@@ -234,6 +243,7 @@ async def write_request_log(
             protocol=source_info.protocol,
             client_name=source_info.client_name,
             auth_token=auth_token,
+            upstream_auth_token=upstream_auth_token,
             model=model,
             status_code=status_code,
             success=success,
@@ -275,6 +285,7 @@ async def wrap_openai_stream_with_logging(
     model: str,
     source_info: RequestSourceInfo,
     auth_token: Optional[str] = None,
+    upstream_auth_token: Optional[str] = None,
     started_at: float,
 ) -> AsyncGenerator[str, None]:
     """Wrap OpenAI SSE stream and persist completion metadata."""
@@ -341,6 +352,7 @@ async def wrap_openai_stream_with_logging(
             model=model,
             source_info=source_info,
             auth_token=auth_token,
+            upstream_auth_token=upstream_auth_token,
             success=success,
             started_at=started_at,
             status_code=status_code,
@@ -361,6 +373,7 @@ async def wrap_claude_stream_with_logging(
     model: str,
     source_info: RequestSourceInfo,
     auth_token: Optional[str] = None,
+    upstream_auth_token: Optional[str] = None,
     started_at: float,
     input_tokens: int,
 ) -> AsyncGenerator[str, None]:
@@ -428,6 +441,7 @@ async def wrap_claude_stream_with_logging(
             model=model,
             source_info=source_info,
             auth_token=auth_token,
+            upstream_auth_token=upstream_auth_token,
             success=success,
             started_at=started_at,
             status_code=status_code,

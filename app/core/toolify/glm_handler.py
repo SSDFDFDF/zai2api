@@ -281,7 +281,7 @@ class GLMToolHandler:
         if not tool_calls:
             return []
 
-        logger.info(
+        logger.debug(
             "[glm-native] 提取 {} 个工具调用 (block={}, delta={})",
             len(tool_calls), len(block_calls), len(delta_calls),
         )

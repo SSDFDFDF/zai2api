@@ -1401,7 +1401,7 @@ class ResponseHandler:
                     },
                 })
             if glm_tool_calls:
-                self.logger.info(
+                self.logger.debug(
                     "[glm-native] 非流式提取 {} 个工具调用",
                     len(glm_tool_calls),
                 )

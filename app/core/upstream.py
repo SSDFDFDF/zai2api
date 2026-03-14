@@ -940,7 +940,7 @@ class UpstreamClient:
         *,
         http_request=None,
         **kwargs
-    ) -> Union[Dict[str, Any], AsyncGenerator[str, None]]:
+    ) -> tuple[Union[Dict[str, Any], AsyncGenerator[str, None]], Optional[str]]:
         """聊天完成接口。
 
         Args:
@@ -956,9 +956,10 @@ class UpstreamClient:
             max_attempts = await self._get_total_retry_limit()
 
             if request.stream:
-                return await self._create_stream_response(
+                result = await self._create_stream_response(
                     request, transformed, http_request=http_request,
                 )
+                return result, str(transformed.get("token") or "") or None
 
             client = self._get_shared_client()
             excluded_tokens: Set[str] = set()
@@ -1043,7 +1044,10 @@ class UpstreamClient:
                                 )
                         await self._release_guest_session(transformed)
                         self.logger.error("❌ {} 响应失败: {}", self.name, error_msg)
-                        return handle_error(Exception(error_message or error_msg))
+                        return (
+                            handle_error(Exception(error_message or error_msg)),
+                            str(transformed.get("token") or "") or None,
+                        )
 
                     await self._commit_session_if_needed(transformed)
                     try:
@@ -1060,7 +1064,7 @@ class UpstreamClient:
                             if token_pool:
                                 await token_pool.record_token_success(current_token)
 
-                    return result
+                    return result, str(transformed.get("token") or "") or None
 
         except Exception as e:
             self.logger.error("❌ {} 响应失败: {}", self.name, str(e))
@@ -1068,7 +1072,7 @@ class UpstreamClient:
                 await self._release_guest_session(transformed)
             except Exception:
                 pass
-            return handle_error(e, "请求处理")
+            return handle_error(e, "请求处理"), None
 
     async def _create_stream_response(
         self,
