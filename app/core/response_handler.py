@@ -584,10 +584,10 @@ class ResponseHandler:
             elif phase == "tool_response":
                 pass  # 由 _handle_glm_tool_hint 处理
             elif phase in ("answer", "thinking"):
-                # native/hybrid: tool_call 阶段结束，标记待解析
+                # glmnative: tool_call 阶段结束，标记待解析
                 if (
                     ctx.in_glm_tool_execution
-                    and ctx.tool_strategy in ("native", "hybrid")
+                    and ctx.tool_strategy == "glmnative"
                 ):
                     ctx.glm_tool_calls_pending = True
                 if ctx.in_glm_tool_execution:
@@ -1330,10 +1330,10 @@ class ResponseHandler:
 
         final_content = (final_content or "").strip()
 
-        # GLM native tool_calls 提取（native/hybrid 模式，glm_block 清理前）
+        # GLM native tool_calls 提取（glmnative 模式，glm_block 清理前）
         if (
             not tool_calls_accum
-            and tool_strategy in ("native", "hybrid")
+            and tool_strategy == "glmnative"
         ):
             allowed = GLMToolHandler._extract_tool_names(tools_defs)
             glm_tool_calls = GLMToolHandler.parse_tool_calls(
@@ -1341,7 +1341,7 @@ class ResponseHandler:
             )
             if glm_tool_calls:
                 self.logger.info(
-                    "🔧 [glm-native] 非流式提取 {} 个工具调用",
+                    "[glm-native] 非流式提取 {} 个工具调用",
                     len(glm_tool_calls),
                 )
                 tool_calls_accum.extend(glm_tool_calls)

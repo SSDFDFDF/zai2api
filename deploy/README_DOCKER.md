@@ -85,7 +85,7 @@ deploy/
 | `SKIP_AUTH_TOKEN` | `false` | 跳过 API 验证 |
 | `ANONYMOUS_MODE` | `true` | 匿名访问模式 |
 | `DEBUG_LOGGING` | `true` | 调试日志开关 |
-| `TOOL_STRATEGY` | `xmlfc` | 工具调用策略：xmlfc / native / hybrid / disabled |
+| `TOOL_STRATEGY` | `xmlfc` | 工具调用策略：xmlfc / native / hybrid / glmnative / disabled |
 
 **生产环境建议**:
 - 修改 `ADMIN_PASSWORD` 和 `AUTH_TOKEN`

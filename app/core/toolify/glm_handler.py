@@ -223,7 +223,7 @@ class GLMToolHandler:
             return []
 
         logger.info(
-            "🔧 [glm-native] 从 buffered_content 提取 {} 个工具调用",
+            "[glm-native] 从 buffered_content 提取 {} 个工具调用",
             len(tool_calls),
         )
         ctx.tool_calls_accum.extend(tool_calls)

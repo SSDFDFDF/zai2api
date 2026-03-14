@@ -87,11 +87,11 @@ CONFIG_SECTIONS: tuple[ConfigSectionSpec, ...] = (
             ConfigFieldSpec(
                 key="TOOL_STRATEGY",
                 label="工具调用策略",
-                description="xmlfc=XML提示词注入（默认）| native=原生透传 | hybrid=混合模式 | disabled=禁用",
+                description="xmlfc=XML提示词注入（默认）| native=原生透传 | hybrid=混合模式 | glmnative=GLM原生 | disabled=禁用",
                 value_type="str",
                 default_value="xmlfc",
                 input_type="select",
-                options=("xmlfc", "native", "hybrid", "disabled"),
+                options=("xmlfc", "native", "hybrid", "glmnative", "disabled"),
             ),
             ConfigFieldSpec(
                 key="SCAN_LIMIT",

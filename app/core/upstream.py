@@ -866,8 +866,8 @@ class UpstreamClient:
                 )
 
             # 构建请求体
-            passthrough_tools = tools if tool_strategy in ("native", "hybrid") else None
-            passthrough_tool_choice = tool_choice if tool_strategy in ("native", "hybrid") else None
+            passthrough_tools = tools if tool_strategy in ("native", "hybrid", "glmnative") else None
+            passthrough_tool_choice = tool_choice if tool_strategy in ("native", "hybrid", "glmnative") else None
             body = build_upstream_body(
                 messages=messages,
                 files=files,

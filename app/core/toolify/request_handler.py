@@ -58,8 +58,8 @@ class ToolifyRequestHandler:
                 tool_strategy=strategy,
             )
 
-        if strategy == "native":
-            # native：透传 tools，不注入 XML
+        if strategy == "native" or strategy == "glmnative":
+            # native / glmnative：透传 tools，不注入 XML
             normalized_messages = preprocess_openai_messages(
                 raw_messages, trigger_signal="",
             )
