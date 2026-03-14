@@ -16,7 +16,7 @@ from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple
 
 from app.core.openai_compat import create_openai_chunk, format_sse_chunk
 from app.utils.logger import get_logger
-from app.utils.tool_call_handler import (
+from .xml_protocol import (
     StreamingFunctionCallDetector,
     looks_like_complete_function_calls,
     parse_and_extract_tool_calls,

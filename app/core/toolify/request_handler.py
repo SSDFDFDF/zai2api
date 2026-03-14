@@ -13,9 +13,9 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from app.core.config import settings
-from app.core.message_preprocessing import preprocess_openai_messages
 from app.utils.logger import get_logger
-from app.utils.tool_call_handler import (
+from .message import preprocess_openai_messages
+from .xml_protocol import (
     generate_trigger_signal,
     process_messages_with_tools,
 )
@@ -31,6 +31,7 @@ class ToolifyPreparedRequest:
     tool_choice: Any
     trigger_signal: str
     normalized_messages: List[Dict[str, Any]]
+    tool_strategy: str = "xmlfc"
 
 
 class ToolifyRequestHandler:
@@ -42,11 +43,38 @@ class ToolifyRequestHandler:
         request_tools: Any,
         tool_choice: Any,
     ) -> ToolifyPreparedRequest:
-        tools = request_tools if settings.TOOL_SUPPORT and request_tools else None
-        trigger_signal = generate_trigger_signal() if tools else ""
+        strategy = settings.TOOL_STRATEGY
 
-        if trigger_signal:
-            logger.debug("🔧 生成 XML 触发信号: {}", trigger_signal)
+        if strategy == "disabled" or not request_tools:
+            # disabled 或无 tools：仅做消息规范化
+            normalized_messages = preprocess_openai_messages(
+                raw_messages, trigger_signal="",
+            )
+            return ToolifyPreparedRequest(
+                tools=None,
+                tool_choice=None,
+                trigger_signal="",
+                normalized_messages=normalized_messages,
+                tool_strategy=strategy,
+            )
+
+        if strategy == "native":
+            # native：透传 tools，不注入 XML
+            normalized_messages = preprocess_openai_messages(
+                raw_messages, trigger_signal="",
+            )
+            return ToolifyPreparedRequest(
+                tools=request_tools,
+                tool_choice=tool_choice,
+                trigger_signal="",
+                normalized_messages=normalized_messages,
+                tool_strategy=strategy,
+            )
+
+        # xmlfc / hybrid：生成 trigger_signal + XML 注入
+        tools = request_tools
+        trigger_signal = generate_trigger_signal()
+        logger.debug("🔧 生成 XML 触发信号: {}", trigger_signal)
 
         normalized_messages = preprocess_openai_messages(
             raw_messages,
@@ -64,5 +92,5 @@ class ToolifyRequestHandler:
             tool_choice=tool_choice,
             trigger_signal=trigger_signal,
             normalized_messages=normalized_messages,
+            tool_strategy=strategy,
         )
-

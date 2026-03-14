@@ -11,7 +11,7 @@ import httpx
 sys.path.insert(0, ".")
 
 from app.core.request_signing import build_upstream_body, sign_request
-from app.core.message_preprocessing import extract_user_id_from_token
+from app.utils.jwt_utils import extract_user_id_from_token
 from app.core.config import settings
 
 

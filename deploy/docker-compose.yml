@@ -21,8 +21,8 @@ services:
       - DEBUG_LOGGING=true
       # 匿名模式
       - ANONYMOUS_MODE=true
-      # Function Call 功能开关
-      - TOOL_SUPPORT=true
+      # 工具调用策略: xmlfc | native | hybrid | disabled
+      - TOOL_STRATEGY=xmlfc
       # 工具调用扫描限制(字符数)
       - SCAN_LIMIT=200000
       # 数据库路径 - 使用持久化卷

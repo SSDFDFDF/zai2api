@@ -9,7 +9,7 @@ import os
 # 将项目根目录加入 sys.path, 允许直接 python 运行
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from app.utils.tool_call_handler import (
+from app.core.toolify.xml_protocol import (
     normalize_cdata_markers,
     normalize_xml_tag_names,
     normalize_xml_structure,

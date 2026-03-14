@@ -54,21 +54,36 @@
         {% endif %}
         <span class="block text-xs text-gray-500 mb-2">{{ field.description }}</span>
 
-        <div class="relative mt-1" {% if field.sensitive %}x-data="{ show: false }" {% endif %}>
-            <input id="{{ field.key }}" name="{{ field.key }}" {% if field.sensitive
-                %}:type="show ? 'text' : 'password'" {% else %}type="{{ field.input_type }}" {% endif %}
+        {% if field.input_type == 'select' %}
+        <select name="{{ field.key }}" id="{{ field.key }}"
+            class="block w-full px-4 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition-all shadow-sm">
+            {% for opt in field.options %}
+            <option value="{{ opt }}" {% if field.value == opt %}selected{% endif %}>{{ opt }}</option>
+            {% endfor %}
+        </select>
+        {% elif field.sensitive %}
+        <div class="relative mt-1" x-data="{ show: false }">
+            <input id="{{ field.key }}" name="{{ field.key }}"
+                :type="show ? 'text' : 'password'"
                 value="{{ field.value }}" placeholder="{{ field.placeholder }}" {% if field.required %}required{% endif
                 %} {% if field.min_value is not none %}min="{{ field.min_value }}" {% endif %} {% if field.max_value is
                 not none %}max="{{ field.max_value }}" {% endif %}
                 class="block w-full px-4 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition-all shadow-sm">
-
-            {% if field.sensitive %}
             <button type="button" @click="show = !show"
                 class="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-indigo-600 transition">
                 <span x-text="show ? '隐藏' : '显示'" class="text-xs font-medium"></span>
             </button>
-            {% endif %}
         </div>
+        {% else %}
+        <div class="relative mt-1">
+            <input id="{{ field.key }}" name="{{ field.key }}"
+                type="{{ field.input_type }}"
+                value="{{ field.value }}" placeholder="{{ field.placeholder }}" {% if field.required %}required{% endif
+                %} {% if field.min_value is not none %}min="{{ field.min_value }}" {% endif %} {% if field.max_value is
+                not none %}max="{{ field.max_value }}" {% endif %}
+                class="block w-full px-4 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition-all shadow-sm">
+        </div>
+        {% endif %}
     </label>
     {% endif %}
 </div>

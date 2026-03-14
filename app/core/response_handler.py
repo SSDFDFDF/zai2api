@@ -22,11 +22,11 @@ from app.core.openai_compat import (
     format_sse_chunk,
     handle_error,
 )
-from app.core.response_handler_glm import GLMToolHandler
+from app.core.toolify.glm_handler import GLMToolHandler
 from app.core.toolify import ToolifyHandler
 from app.models.schemas import OpenAIRequest
 from app.utils.logger import get_logger
-from app.utils.tool_call_handler import (
+from app.core.toolify.xml_protocol import (
     StreamingFunctionCallDetector,
 )
 
@@ -105,6 +105,7 @@ class StreamContext:
     trigger_signal: str = ""
     tools_defs: Optional[List[Dict[str, Any]]] = None
     detector: Optional[StreamingFunctionCallDetector] = None
+    tool_strategy: str = "xmlfc"
 
     # ------------------------------------------------------------------
     # 辅助方法
@@ -903,8 +904,12 @@ class ResponseHandler:
         if ctx.finished:
             return
 
-        # 最后尝试: 从累积内容中提取工具调用
-        if ctx.has_tools and not ctx.tool_calls_accum:
+        # 最后尝试: 从累积内容中提取工具调用 (仅 xmlfc/hybrid)
+        if (
+            ctx.has_tools
+            and not ctx.tool_calls_accum
+            and ctx.tool_strategy in ("xmlfc", "hybrid")
+        ):
             for sse in self.toolify_handler.finalize_stream_tool_calls(ctx):
                 yield sse
 
@@ -998,11 +1003,9 @@ class ResponseHandler:
         # 初始化上下文
         trigger_signal = transformed.get("trigger_signal", "")
         tools_defs = transformed.get("tools")
-        has_tools = (
-            settings.TOOL_SUPPORT
-            and bool(request.tools)
-            and bool(trigger_signal)
-        )
+        tool_strategy = transformed.get("tool_strategy", "xmlfc")
+        has_tools = tool_strategy != "disabled" and bool(request.tools)
+        need_xml = tool_strategy in ("xmlfc", "hybrid") and bool(trigger_signal)
 
         ctx = StreamContext(
             chat_id=chat_id,
@@ -1010,9 +1013,10 @@ class ResponseHandler:
             has_tools=has_tools,
             trigger_signal=trigger_signal,
             tools_defs=tools_defs,
+            tool_strategy=tool_strategy,
         )
 
-        if has_tools:
+        if need_xml:
             ctx.detector = StreamingFunctionCallDetector(trigger_signal)
             self.logger.debug(
                 "🔧 已初始化流式工具检测器, 触发信号: {}...",
@@ -1042,9 +1046,10 @@ class ResponseHandler:
                 # 累积内容
                 current_text = self._accumulate_content(ctx, data)
 
-                # 上游原生 tool_calls 透传
-                for sse in self._handle_direct_tool_calls(ctx, data):
-                    yield sse
+                # 上游原生 tool_calls 透传（disabled 时跳过）
+                if ctx.tool_strategy != "disabled":
+                    for sse in self._handle_direct_tool_calls(ctx, data):
+                        yield sse
 
                 # GLM 内部工具调用提示
                 tool_hint = self.glm_tool_handler.process(ctx, data)
@@ -1066,42 +1071,43 @@ class ResponseHandler:
                 if not current_text:
                     continue
 
-                # Toolify 工具检测 (非 parsing 模式)
-                detection_result = self.toolify_handler.handle_detection(
-                    ctx, current_text
-                )
-                if detection_result is not None:
-                    for sse in detection_result:
-                        yield sse
-                    continue
-
-                # 工具解析模式
-                parsing_result = self.toolify_handler.handle_parsing(
-                    ctx, current_text
-                )
-                if parsing_result is not None:
-                    # 增补 role 和发送
-                    final_output = self.toolify_handler.inject_role_and_chunks(
-                        ctx, parsing_result
+                # Toolify 工具检测 (仅 xmlfc/hybrid)
+                if ctx.tool_strategy in ("xmlfc", "hybrid"):
+                    detection_result = self.toolify_handler.handle_detection(
+                        ctx, current_text
                     )
-                    for sse in final_output:
-                        yield sse
+                    if detection_result is not None:
+                        for sse in detection_result:
+                            yield sse
+                        continue
 
-                    if ctx.tool_calls_accum:
-                        # 解析完成, 自带结流
-                        ctx.finished = True
-                        finish_chunk = create_openai_chunk(
-                            ctx.ensure_stream_id(), ctx.model, {}, "tool_calls",
-                            created=ctx.created_at,
+                    # 工具解析模式
+                    parsing_result = self.toolify_handler.handle_parsing(
+                        ctx, current_text
+                    )
+                    if parsing_result is not None:
+                        # 增补 role 和发送
+                        final_output = self.toolify_handler.inject_role_and_chunks(
+                            ctx, parsing_result
                         )
-                        finish_chunk["usage"] = ctx.usage_info
-                        finish_sse = format_sse_chunk(finish_chunk)
-                        ctx.log_downstream(finish_sse)
-                        yield finish_sse
-                        ctx.log_downstream("data: [DONE]")
-                        yield "data: [DONE]\n\n"
-                        return
-                    continue
+                        for sse in final_output:
+                            yield sse
+
+                        if ctx.tool_calls_accum:
+                            # 解析完成, 自带结流
+                            ctx.finished = True
+                            finish_chunk = create_openai_chunk(
+                                ctx.ensure_stream_id(), ctx.model, {}, "tool_calls",
+                                created=ctx.created_at,
+                            )
+                            finish_chunk["usage"] = ctx.usage_info
+                            finish_sse = format_sse_chunk(finish_chunk)
+                            ctx.log_downstream(finish_sse)
+                            yield finish_sse
+                            ctx.log_downstream("data: [DONE]")
+                            yield "data: [DONE]\n\n"
+                            return
+                        continue
 
                 # 阶段内容输出
                 chunk_type = chunk.get("type")
@@ -1156,6 +1162,7 @@ class ResponseHandler:
         model: str,
         trigger_signal: str = "",
         tools_defs: Optional[List[Dict[str, Any]]] = None,
+        tool_strategy: str = "xmlfc",
     ) -> Dict[str, Any]:
         """处理非流式响应，聚合上游 SSE 为一次性 OpenAI 响应。
 
@@ -1281,12 +1288,14 @@ class ResponseHandler:
                     if search_content:
                         final_content_parts.append(search_content)
 
-                tool_calls_accum.extend(
-                    self.normalize_tool_calls(
-                        data.get("tool_calls"),
-                        len(tool_calls_accum),
+                # 原生 tool_calls 收集（disabled 时跳过）
+                if tool_strategy != "disabled":
+                    tool_calls_accum.extend(
+                        self.normalize_tool_calls(
+                            data.get("tool_calls"),
+                            len(tool_calls_accum),
+                        )
                     )
-                )
 
                 if data.get("usage"):
                     usage_info = data["usage"]
@@ -1298,7 +1307,8 @@ class ResponseHandler:
             return handle_error(e, "非流式聚合")
 
         final_content = "".join(final_content_parts)
-        if not tool_calls_accum:
+        # XML 兜底提取（仅 xmlfc/hybrid）
+        if not tool_calls_accum and tool_strategy in ("xmlfc", "hybrid"):
             tool_calls_accum, final_content = self.toolify_handler.extract_non_stream_tool_calls(
                 final_content,
                 trigger_signal=trigger_signal,

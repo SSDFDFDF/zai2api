@@ -1,52 +1,14 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-"""OpenAI 消息预处理 + JWT 工具函数。
+"""OpenAI 消息预处理。
 
-将原 upstream.py 中的消息规范化函数和 JWT 解析工具提取为独立模块。
-支持 Toolify XML 格式的工具调用历史还原。
+将 OpenAI 格式的消息列表规范化为上游服务可接受的形式，
+包括 tool 角色转换、assistant tool_calls 序列化等。
 """
 
-import base64
 import json
-from typing import Any, Dict, List, Optional
-
-
-# ---------------------------------------------------------------------------
-# JWT 解析工具
-# ---------------------------------------------------------------------------
-
-
-def _urlsafe_b64decode(data: str) -> bytes:
-    """Decode a URL-safe base64 string with proper padding."""
-    if isinstance(data, str):
-        data_bytes = data.encode("utf-8")
-    else:
-        data_bytes = data
-    padding = b"=" * (-len(data_bytes) % 4)
-    return base64.urlsafe_b64decode(data_bytes + padding)
-
-
-def _decode_jwt_payload(token: str) -> Dict[str, Any]:
-    """Decode JWT payload without verification to extract metadata."""
-    try:
-        parts = token.split(".")
-        if len(parts) < 2:
-            return {}
-        payload_raw = _urlsafe_b64decode(parts[1])
-        return json.loads(payload_raw.decode("utf-8", errors="ignore"))
-    except Exception:
-        return {}
-
-
-def extract_user_id_from_token(token: str) -> str:
-    """Extract user_id from a JWT's payload. Fallback to 'guest'."""
-    payload = _decode_jwt_payload(token) if token else {}
-    for key in ("id", "user_id", "uid", "sub"):
-        val = payload.get(key)
-        if isinstance(val, (str, int)) and str(val):
-            return str(val)
-    return "guest"
+from typing import Any, Dict, List
 
 
 # ---------------------------------------------------------------------------

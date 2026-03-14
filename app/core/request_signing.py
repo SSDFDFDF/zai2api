@@ -171,11 +171,10 @@ def build_upstream_body(
     temperature: Optional[float],
     max_tokens: Optional[int],
     parent_message_id: Optional[str] = None,
+    tools: Optional[List[Dict[str, Any]]] = None,
+    tool_choice: Any = None,
 ) -> Dict[str, Any]:
     """构建发送到上游的请求 JSON body。
-
-    采用 Toolify XML 方案后，工具定义通过 system prompt 注入，
-    不再通过 body 透传 tools/tool_choice 字段。
 
     Args:
         messages: 上游格式消息列表。
@@ -192,6 +191,9 @@ def build_upstream_body(
         mcp_servers: MCP 服务器 ID 列表。
         temperature: 采样温度，None 时不添加到 params。
         max_tokens: 最大 token 数，None 时不添加到 params。
+        parent_message_id: 父消息 ID（用于链式会话）。
+        tools: native/hybrid 策略时透传的工具定义列表。
+        tool_choice: native/hybrid 策略时透传的工具选择。
 
     Returns:
         完整的上游请求 body 字典。
@@ -239,9 +241,11 @@ def build_upstream_body(
     if mcp_servers:
         body["mcp_servers"] = mcp_servers
 
-    # NOTE: tools/tool_choice 不再透传到 body。
-    # Toolify XML 方案通过 system prompt 注入工具定义，
-    # 避免与上游原生工具处理冲突。
+    # native/hybrid 策略：透传 tools/tool_choice 到上游 body
+    if tools is not None:
+        body["tools"] = tools
+    if tool_choice is not None:
+        body["tool_choice"] = tool_choice
 
     # 处理其他参数
     # if temperature is not None:

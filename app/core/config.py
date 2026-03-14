@@ -94,7 +94,7 @@ class Settings(BaseSettings):
     GUEST_HTTP_MAX_CONNECTIONS: int = int(
         os.getenv("GUEST_HTTP_MAX_CONNECTIONS", "50")
     )
-    TOOL_SUPPORT: bool = os.getenv("TOOL_SUPPORT", "true").lower() == "true"
+    TOOL_STRATEGY: str = os.getenv("TOOL_STRATEGY", "xmlfc")
     TOOL_RESULT_MAX_LENGTH: int = int(os.getenv("TOOL_RESULT_MAX_LENGTH", "0"))  # 0 = 不截断
     SCAN_LIMIT: int = int(os.getenv("SCAN_LIMIT", "200000"))
     GLM_INTERNAL_TOOL_HINT_ENABLED: bool = (

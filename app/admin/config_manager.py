@@ -36,6 +36,7 @@ class ConfigFieldSpec:
     min_value: int | None = None
     max_value: int | None = None
     db_persist: bool = True
+    options: tuple[str, ...] = ()  # 仅 input_type="select" 时使用
 
 
 @dataclass(frozen=True)
@@ -84,11 +85,13 @@ CONFIG_SECTIONS: tuple[ConfigSectionSpec, ...] = (
                 default_value=False,
             ),
             ConfigFieldSpec(
-                key="TOOL_SUPPORT",
-                label="启用 Function Call",
-                description="允许 OpenAI 兼容接口使用工具调用能力。",
-                value_type="bool",
-                default_value=True,
+                key="TOOL_STRATEGY",
+                label="工具调用策略",
+                description="xmlfc=XML提示词注入（默认）| native=原生透传 | hybrid=混合模式 | disabled=禁用",
+                value_type="str",
+                default_value="xmlfc",
+                input_type="select",
+                options=("xmlfc", "native", "hybrid", "disabled"),
             ),
             ConfigFieldSpec(
                 key="SCAN_LIMIT",
@@ -787,6 +790,7 @@ def build_config_page_data(
                     "max_value": field.max_value,
                     "source_label": source_label,
                     "source_badge_class": source_badge_class,
+                    "options": field.options,
                 }
             )
 
