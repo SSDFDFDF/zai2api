@@ -1066,20 +1066,22 @@ class ResponseHandler:
             ctx.has_tools
             and not ctx.tool_calls_accum
             and ctx.tool_strategy == "xmlfc"
+            and (not ctx.turn_engine or ctx.turn_engine.state == "undecided")
         ):
-            finalized_tool_chunks = self.toolify_handler.finalize_stream_tool_calls(ctx)
-            if finalized_tool_chunks and ctx.turn_engine and ctx.tool_calls_accum:
-                finalized_tool_calls = list(ctx.tool_calls_accum)
-                ctx.tool_calls_accum = []
-                finalized_tool_chunks = self._apply_turn_engine_actions(
+            finalized_tool_calls = self.toolify_handler.finalize_stream_tool_calls(ctx)
+            if finalized_tool_calls and ctx.turn_engine:
+                for sse in self._apply_turn_engine_actions(
                     ctx,
                     ctx.turn_engine.commit_tool_calls(
                         finalized_tool_calls,
                         reason="xmlfc_finalize",
                     ),
-                )
-            for sse in finalized_tool_chunks:
-                yield sse
+                ):
+                    yield sse
+            elif finalized_tool_calls:
+                for tool_call in finalized_tool_calls:
+                    for sse in self._emit_sse_raw(ctx, {"tool_calls": [tool_call]}):
+                        yield sse
 
         # glmnative: 流结束前刷出未处理的 delta 工具调用
         if (
@@ -1305,8 +1307,11 @@ class ResponseHandler:
                         ctx, current_text
                     )
                     if detection_result is not None:
-                        for sse in detection_result:
-                            yield sse
+                        if detection_result.output_text:
+                            for sse in self._emit_sse(
+                                ctx, {"content": detection_result.output_text}
+                            ):
+                                yield sse
                         continue
 
                     # 工具解析模式
@@ -1314,10 +1319,9 @@ class ResponseHandler:
                         ctx, current_text
                     )
                     if parsing_result is not None:
-                        final_output = parsing_result
-                        if ctx.tool_calls_accum and ctx.turn_engine:
-                            parsed_tool_calls = list(ctx.tool_calls_accum)
-                            ctx.tool_calls_accum = []
+                        final_output: List[str] = []
+                        parsed_tool_calls = list(parsing_result.tool_calls)
+                        if parsed_tool_calls and ctx.turn_engine:
                             final_output = self._apply_turn_engine_actions(
                                 ctx,
                                 ctx.turn_engine.commit_tool_calls(
@@ -1325,14 +1329,41 @@ class ResponseHandler:
                                     reason="xmlfc_parse",
                                 ),
                             )
-                        elif parsing_result:
-                            final_output = self.toolify_handler.inject_role_and_chunks(
-                                ctx, parsing_result
-                            )
+                        elif parsed_tool_calls:
+                            for tool_call in parsed_tool_calls:
+                                final_output.extend(
+                                    self._emit_sse_raw(
+                                        ctx, {"tool_calls": [tool_call]}
+                                    )
+                                )
                         for sse in final_output:
                             yield sse
 
-                        if ctx.tool_calls_accum and (
+                        if (
+                            parsed_tool_calls
+                            and ctx.turn_engine
+                            and ctx.turn_engine.state == "text_turn"
+                            and not final_output
+                        ):
+                            self.logger.debug(
+                                "[turn-engine][chat] quarantine late xmlfc tool block after text_turn: tools={}, replay_chars={}",
+                                len(parsed_tool_calls),
+                                len(parsing_result.replay_text),
+                            )
+
+                        if parsing_result.replay_text:
+                            if ctx.turn_engine and ctx.turn_engine.state == "tool_turn":
+                                self.logger.debug(
+                                    "[turn-engine][chat] drop trailing text after xmlfc tool_turn: {} chars",
+                                    len(parsing_result.replay_text),
+                                )
+                            else:
+                                for sse in self._emit_sse(
+                                    ctx, {"content": parsing_result.replay_text}
+                                ):
+                                    yield sse
+
+                        if parsed_tool_calls and (
                             not ctx.turn_engine
                             or ctx.turn_engine.state == "tool_turn"
                         ):

@@ -12,6 +12,7 @@
 import json
 import re
 import uuid
+from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple
 
 from app.core.openai_compat import create_openai_chunk, format_sse_chunk
@@ -26,6 +27,14 @@ from .xml_protocol import (
 
 logger = get_logger()
 _FUNCTION_TRIGGER_RE = re.compile(r"<Function_[A-Za-z0-9]{4}_Start/>")
+_FUNCTION_CALLS_CLOSE_RE = re.compile(
+    r"</\s*function[\s_-]*calls\s*>",
+    re.IGNORECASE,
+)
+_FUNCTION_CALLS_OPEN_RE = re.compile(
+    r"<\s*function[\s_-]*calls\b[^>]*>",
+    re.IGNORECASE,
+)
 
 
 class ToolifyContext(Protocol):
@@ -42,6 +51,18 @@ class ToolifyContext(Protocol):
 
     def ensure_stream_id(self, chunk_data: Optional[Dict[str, Any]] = None) -> str:
         ...
+
+
+@dataclass
+class ToolifyDetectionResult:
+    output_text: str = ""
+    detected: bool = False
+
+
+@dataclass
+class ToolifyParsingResult:
+    tool_calls: List[Dict[str, Any]] = field(default_factory=list)
+    replay_text: str = ""
 
 
 class ToolifyHandler:
@@ -68,7 +89,7 @@ class ToolifyHandler:
 
     def handle_detection(
         self, ctx: ToolifyContext, current_text: str
-    ) -> Optional[List[str]]:
+    ) -> Optional[ToolifyDetectionResult]:
         """Toolify 流式工具检测 (非 tool_parsing 模式)。"""
         detector = getattr(ctx, "detector", None)
         phase = getattr(ctx, "last_phase", None)
@@ -94,18 +115,16 @@ class ToolifyHandler:
                 )
                 setattr(ctx, "trigger_signal", detector_signal)
             logger.debug("🔧 流式检测器触发工具调用信号, 切换到解析模式")
-            output: List[str] = []
-            if content_to_yield and self.emit_func:
-                output.extend(self.emit_func(ctx, {"content": content_to_yield}))
-            return output
+            return ToolifyDetectionResult(
+                output_text=content_to_yield,
+                detected=True,
+            )
 
-        if content_to_yield and self.emit_func:
-            return self.emit_func(ctx, {"content": content_to_yield})
-        return []
+        return ToolifyDetectionResult(output_text=content_to_yield, detected=False)
 
     def handle_parsing(
         self, ctx: ToolifyContext, current_text: str
-    ) -> Optional[List[str]]:
+    ) -> Optional[ToolifyParsingResult]:
         """累积工具调用 XML 并尝试解析。"""
         detector = getattr(ctx, "detector", None)
         if (
@@ -119,7 +138,7 @@ class ToolifyHandler:
         detector.content_buffer += current_text
 
         if "</function_calls>" not in detector.content_buffer:
-            return []
+            return ToolifyParsingResult()
 
         active_trigger = (
             str(getattr(detector, "trigger_signal", "") or "")
@@ -143,15 +162,13 @@ class ToolifyHandler:
                     inspection.to_log_string(),
                 )
                 recovered = detector.reject_candidate()
-                if recovered and self.emit_func:
-                    return self.emit_func(ctx, {"content": recovered})
-                return []
+                return ToolifyParsingResult(replay_text=recovered)
 
             logger.debug(
                 "🔧 检测到 </function_calls> 但尚无可解析块, 继续缓冲: {}",
                 inspection.to_log_string(),
             )
-            return []
+            return ToolifyParsingResult()
 
         if (
             parsing_mode == "tool_candidate"
@@ -161,7 +178,7 @@ class ToolifyHandler:
                 "🔧 bare XML 候选已闭合, 等待尾部确认或流结束后再解析: {}",
                 inspection.to_log_string(),
             )
-            return []
+            return ToolifyParsingResult()
 
         logger.debug(
             "🔧 检测到 </function_calls>, 开始解析候选块: {}",
@@ -180,32 +197,33 @@ class ToolifyHandler:
                     inspection.to_log_string(),
                 )
                 recovered = detector.reject_candidate()
-                if recovered and self.emit_func:
-                    return self.emit_func(ctx, {"content": recovered})
-                return []
+                return ToolifyParsingResult(replay_text=recovered)
             logger.warning(
                 "⚠️ 检测到 </function_calls> 但 XML 解析失败, 继续缓冲: {}",
                 inspection.to_log_string(),
             )
-            return []
+            return ToolifyParsingResult()
 
         validation_err = validate_parsed_tools(parsed, getattr(ctx, "tools_defs", None))
         if validation_err:
             if allow_bare:
                 logger.debug("🔧 bare XML 候选 Schema 验证失败, 恢复为普通文本输出: {}", validation_err)
                 recovered = detector.reject_candidate()
-                if recovered and self.emit_func:
-                    return self.emit_func(ctx, {"content": recovered})
-                return []
+                return ToolifyParsingResult(replay_text=recovered)
             logger.warning("⚠️ 流式工具 Schema 验证失败: {}", validation_err)
-            return []
+            return ToolifyParsingResult()
 
         logger.info("[tools] success detect: {} tools", len(parsed))
 
         normalized = self._normalize_xml_tools(parsed)
-        tc_chunks = self._build_tool_call_chunks(ctx, normalized)
-        ctx.tool_calls_accum = normalized
-        return tc_chunks
+        replay_text = self._extract_trailing_text_after_root_close(
+            detector.content_buffer
+        )
+        detector.reset()
+        return ToolifyParsingResult(
+            tool_calls=normalized,
+            replay_text=replay_text,
+        )
 
     def inject_role_and_chunks(
         self, ctx: ToolifyContext, parsed_chunks: List[str]
@@ -223,9 +241,8 @@ class ToolifyHandler:
     # 流结束提取
     # ------------------------------------------------------------------
 
-    def finalize_stream_tool_calls(self, ctx: ToolifyContext) -> List[str]:
+    def finalize_stream_tool_calls(self, ctx: ToolifyContext) -> List[Dict[str, Any]]:
         """流结束时从累积内容中提取工具调用 (XML 优先, JSON 降级)。"""
-        output: List[str] = []
         buffered_content = getattr(ctx, "buffered_content", "")
         trigger_signal = str(getattr(ctx, "trigger_signal", "") or "")
         tools_defs = getattr(ctx, "tools_defs", None)
@@ -263,47 +280,15 @@ class ToolifyHandler:
                 if usable:
                     normalized = self._normalize_xml_tools(usable)
                     logger.warning(
-                        "⚠️ Schema 验证失败, 仅发送 {} 个逐项校验通过的工具调用",
+                        "⚠️ Schema 验证失败, 仅保留 {} 个逐项校验通过的工具调用",
                         len(normalized),
                     )
-                    self._append_tool_calls_output(
-                        ctx,
-                        output,
-                        self._build_tool_call_chunks(ctx, normalized),
-                        normalized,
-                    )
+                    return normalized
             else:
-                normalized = self._normalize_xml_tools(parsed)
-                self._append_tool_calls_output(
-                    ctx,
-                    output,
-                    self._build_tool_call_chunks(ctx, normalized),
-                    normalized,
-                )
+                return self._normalize_xml_tools(parsed)
 
-        if not ctx.tool_calls_accum:
-            json_parsed, _ = parse_and_extract_tool_calls(buffered_content)
-            normalized = self._normalize_tool_calls(json_parsed)
-            if normalized:
-                tool_chunks: List[str] = []
-                for tool_call in normalized:
-                    sse = format_sse_chunk(
-                        create_openai_chunk(
-                            ctx.ensure_stream_id(),
-                            ctx.model,
-                            {"tool_calls": [tool_call]},
-                        )
-                    )
-                    self._log_downstream(ctx, sse)
-                    tool_chunks.append(sse)
-                self._append_tool_calls_output(
-                    ctx,
-                    output,
-                    tool_chunks,
-                    normalized,
-                )
-
-        return output
+        json_parsed, _ = parse_and_extract_tool_calls(buffered_content)
+        return self._normalize_tool_calls(json_parsed)
 
     # ------------------------------------------------------------------
     # 非流式提取
@@ -425,6 +410,21 @@ class ToolifyHandler:
             "ToolifyHandler._normalize_tool_calls called without "
             "normalize_tool_calls_func; caller must inject the delegate"
         )
+
+    @staticmethod
+    def _extract_trailing_text_after_root_close(buffer: str) -> str:
+        if not buffer:
+            return ""
+
+        open_match = _FUNCTION_CALLS_OPEN_RE.search(buffer)
+        if not open_match:
+            return ""
+
+        close_match = _FUNCTION_CALLS_CLOSE_RE.search(buffer, open_match.end())
+        if not close_match:
+            return ""
+
+        return buffer[close_match.end() :]
 
     @staticmethod
     def _normalize_xml_tools(parsed_tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

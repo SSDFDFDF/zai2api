@@ -239,6 +239,34 @@ def test_streaming_triggered_xml_uses_regex_fallback_when_et_parse_fails():
     assert arguments["file_path"] == "/tmp/demo.txt"
 
 
+def test_late_triggered_xml_after_text_turn_is_quarantined_and_tail_text_survives():
+    long_prefix = "前置文本" * 80
+    chunks = [
+        f'data: {json.dumps({"type":"chat:completion","data":{"phase":"answer","delta_content":long_prefix}}, ensure_ascii=False)}',
+        'data: {"type":"chat:completion","data":{"phase":"answer","delta_content":"<Function_TEST_Start/>\\n<function_calls>\\n<function_call>\\n<tool>Read</tool>\\n<args_json><![CDATA[{\\"file_path\\": \\"/tmp/late.txt\\"}]]></args_json>\\n</function_call>\\n</function_calls>后续解释A"}}',
+        'data: {"type":"chat:completion","data":{"phase":"answer","delta_content":"后续解释B"}}',
+        'data: {"type":"chat:completion","data":{"phase":"done","done":true}}',
+    ]
+
+    outputs = asyncio.run(_collect_outputs(chunks))
+    payloads = _extract_chunks(outputs)
+
+    tool_calls = []
+    content_parts = []
+    finish_reason = None
+    for payload in payloads:
+        choice = payload["choices"][0]
+        finish_reason = choice.get("finish_reason") or finish_reason
+        delta = choice.get("delta", {})
+        if delta.get("content"):
+            content_parts.append(delta["content"])
+        tool_calls.extend(delta.get("tool_calls", []) or [])
+
+    assert tool_calls == []
+    assert "".join(content_parts) == f"{long_prefix}后续解释A后续解释B"
+    assert finish_reason == "stop"
+
+
 class _FinalizeCtx:
     def __init__(self, buffered_content, tools_defs, trigger_signal):
         self.model = "GLM-5-Thinking"
@@ -279,12 +307,7 @@ def test_finalize_only_emits_schema_valid_tool_calls():
 
     ctx = _FinalizeCtx(buffered_content, [EDIT_TOOL], trigger_signal)
     handler = ToolifyHandler()
-    outputs = handler.finalize_stream_tool_calls(ctx)
-    payloads = _extract_chunks(outputs)
-
-    tool_calls = []
-    for payload in payloads:
-        tool_calls.extend(payload["choices"][0].get("delta", {}).get("tool_calls", []) or [])
+    tool_calls = handler.finalize_stream_tool_calls(ctx)
 
     assert len(tool_calls) == 1
     arguments = json.loads(tool_calls[0]["function"]["arguments"])
