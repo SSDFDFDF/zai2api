@@ -13,7 +13,7 @@ import uvicorn
 
 from app.admin import api as admin_api
 from app.admin import routes as admin_routes
-from app.core import claude, openai
+from app.core import claude, openai, openai_responses
 from app.core.config import settings
 from app.utils.logger import setup_logger
 from app.utils.reload_config import get_uvicorn_reload_config
@@ -182,6 +182,7 @@ except RuntimeError:
 
 # Include API routers
 app.include_router(openai.router)
+app.include_router(openai_responses.router)
 app.include_router(claude.router)
 
 # Include admin routers

@@ -24,6 +24,7 @@ from app.core.openai_compat import (
 )
 from app.core.toolify.glm_handler import GLMToolHandler
 from app.core.toolify import ToolifyHandler
+from app.core.turn_engine import TurnEngine, TurnEngineAction, TurnEngineConfig
 from app.models.schemas import OpenAIRequest
 from app.utils.logger import get_logger
 from app.core.toolify.xml_protocol import (
@@ -113,6 +114,12 @@ class StreamContext:
 
     # GLM delta 流式工具调用累积 (delta_name / delta_arguments 格式)
     glm_delta_tool_calls: List[Dict[str, Any]] = field(default_factory=list)
+
+    # 严格工具边界状态机
+    turn_engine: Optional[TurnEngine] = None
+
+    # reasoning_content 缓冲；tool_turn 成立前不直接下发
+    pending_reasoning_parts: List[str] = field(default_factory=list)
 
     # ------------------------------------------------------------------
     # 辅助方法
@@ -451,7 +458,7 @@ class ResponseHandler:
 
         return "\n\n---\n" + "\n".join(citations)
 
-    def _emit_sse(
+    def _emit_sse_raw(
         self,
         ctx: StreamContext,
         delta: Dict[str, Any],
@@ -472,6 +479,123 @@ class ResponseHandler:
         ctx.log_downstream(sse)
         output.append(sse)
         return output
+
+    def _apply_turn_engine_actions(
+        self,
+        ctx: StreamContext,
+        actions: List[TurnEngineAction],
+    ) -> List[str]:
+        output: List[str] = []
+        for action in actions:
+            if action.kind == "emit_text":
+                output.extend(self._flush_pending_reasoning(ctx))
+                output.extend(self._emit_sse_raw(ctx, {"content": action.text}))
+                continue
+
+            if action.kind == "emit_tool_calls":
+                if ctx.pending_reasoning_parts:
+                    self.logger.debug(
+                        "[turn-engine][chat] drop {} buffered reasoning chars before tool_turn",
+                        len("".join(ctx.pending_reasoning_parts)),
+                    )
+                    ctx.pending_reasoning_parts = []
+                ctx.tool_calls_accum.extend(action.tool_calls)
+                for tool_call in action.tool_calls:
+                    output.extend(
+                        self._emit_sse_raw(ctx, {"tool_calls": [tool_call]})
+                    )
+                continue
+
+            self.logger.debug(
+                "[turn-engine][chat] action={} reason={} dropped_chars={}",
+                action.kind,
+                action.reason,
+                action.dropped_chars,
+            )
+
+        return output
+
+    def _flush_pending_reasoning(self, ctx: StreamContext) -> List[str]:
+        if not ctx.pending_reasoning_parts:
+            return []
+
+        reasoning = "".join(ctx.pending_reasoning_parts)
+        ctx.pending_reasoning_parts = []
+        if not reasoning:
+            return []
+
+        return self._emit_sse_raw(ctx, {"reasoning_content": reasoning})
+
+    def _flush_turn_engine_text(
+        self,
+        ctx: StreamContext,
+        *,
+        force: bool = False,
+        reason: str = "manual_flush",
+    ) -> List[str]:
+        if not ctx.turn_engine:
+            return []
+        return self._apply_turn_engine_actions(
+            ctx,
+            ctx.turn_engine.flush_text(force=force, reason=reason),
+        )
+
+    def _emit_sse(
+        self,
+        ctx: StreamContext,
+        delta: Dict[str, Any],
+    ) -> List[str]:
+        """构建 SSE chunk 并返回待 yield 的列表 (含可能的 role chunk)。"""
+        if not delta:
+            return []
+
+        if not ctx.turn_engine:
+            return self._emit_sse_raw(ctx, delta)
+
+        if "tool_calls" in delta:
+            raw_tool_calls = delta.get("tool_calls")
+            tool_calls = (
+                raw_tool_calls
+                if isinstance(raw_tool_calls, list)
+                else [raw_tool_calls]
+            )
+            normalized = self.normalize_tool_calls(
+                tool_calls,
+                len(ctx.tool_calls_accum),
+            )
+            return self._apply_turn_engine_actions(
+                ctx,
+                ctx.turn_engine.commit_tool_calls(
+                    normalized,
+                    reason="stream_tool_calls",
+                ),
+            )
+
+        content = delta.get("content")
+        if isinstance(content, str):
+            return self._apply_turn_engine_actions(
+                ctx,
+                ctx.turn_engine.buffer_text(content),
+            )
+
+        reasoning_content = delta.get("reasoning_content")
+        if isinstance(reasoning_content, str):
+            if ctx.turn_engine.state == "tool_turn":
+                self.logger.debug(
+                    "[turn-engine][chat] ignore reasoning after tool_turn: {} chars",
+                    len(reasoning_content),
+                )
+                return []
+            if ctx.has_tools and ctx.turn_engine.state == "undecided":
+                ctx.pending_reasoning_parts.append(reasoning_content)
+                self.logger.debug(
+                    "[turn-engine][chat] buffer reasoning while undecided: {} chars",
+                    len(reasoning_content),
+                )
+                return []
+            return self._emit_sse_raw(ctx, delta)
+
+        return self._emit_sse_raw(ctx, delta)
 
     def _ensure_role_sse(self, ctx: StreamContext) -> Optional[str]:
         """确保已发送 role=assistant，返回新增的 role chunk。"""
@@ -749,19 +873,11 @@ class ResponseHandler:
         self, ctx: StreamContext, data: Dict[str, Any]
     ) -> List[str]:
         """处理上游原生 tool_calls 直接透传。"""
-        direct_tool_calls = self.normalize_tool_calls(
-            data.get("tool_calls"), len(ctx.tool_calls_accum)
-        )
+        direct_tool_calls = data.get("tool_calls")
         if not direct_tool_calls:
             return []
 
-        ctx.tool_calls_accum.extend(direct_tool_calls)
-        output: List[str] = []
-        for tool_call in direct_tool_calls:
-            output.extend(
-                self._emit_sse(ctx, {"tool_calls": [tool_call]})
-            )
-        return output
+        return self._emit_sse(ctx, {"tool_calls": direct_tool_calls})
 
     # ==================================================================
     # 流式处理: 重复循环检测
@@ -807,7 +923,7 @@ class ResponseHandler:
             "\n\n[ERROR: Model output repetition loop detected, "
             "stream terminated automatically. Please retry.]"
         )
-        return self._emit_sse(ctx, {"content": error_msg})
+        return self._emit_sse_raw(ctx, {"content": error_msg})
 
     # ==================================================================
     # 流式处理: 思维残留清理
@@ -945,13 +1061,24 @@ class ResponseHandler:
         if ctx.finished:
             return
 
-        # 最后尝试: 从累积内容中提取工具调用 (仅 xmlfc/hybrid)
+        # 最后尝试: 从累积内容中提取工具调用 (仅 xmlfc)
         if (
             ctx.has_tools
             and not ctx.tool_calls_accum
-            and ctx.tool_strategy in ("xmlfc", "hybrid")
+            and ctx.tool_strategy == "xmlfc"
         ):
-            for sse in self.toolify_handler.finalize_stream_tool_calls(ctx):
+            finalized_tool_chunks = self.toolify_handler.finalize_stream_tool_calls(ctx)
+            if finalized_tool_chunks and ctx.turn_engine and ctx.tool_calls_accum:
+                finalized_tool_calls = list(ctx.tool_calls_accum)
+                ctx.tool_calls_accum = []
+                finalized_tool_chunks = self._apply_turn_engine_actions(
+                    ctx,
+                    ctx.turn_engine.commit_tool_calls(
+                        finalized_tool_calls,
+                        reason="xmlfc_finalize",
+                    ),
+                )
+            for sse in finalized_tool_chunks:
                 yield sse
 
         # glmnative: 流结束前刷出未处理的 delta 工具调用
@@ -964,6 +1091,18 @@ class ResponseHandler:
             for sse in self.glm_tool_handler.handle_native_extraction(ctx):
                 yield sse
 
+        if not ctx.tool_calls_accum:
+            for sse in self._flush_turn_engine_text(
+                ctx,
+                force=True,
+                reason="stream_finalize",
+            ):
+                yield sse
+
+        if not ctx.tool_calls_accum:
+            for sse in self._flush_pending_reasoning(ctx):
+                yield sse
+
         # 确保 role 已发送
         role_sse = self._ensure_role_sse(ctx)
         if role_sse:
@@ -972,16 +1111,8 @@ class ResponseHandler:
         # 刷出残留的引用标记缓冲
         if ctx.citation_buf:
             if not self._CITATION_TAIL_RE.match(ctx.citation_buf):
-                sse = format_sse_chunk(
-                    create_openai_chunk(
-                        ctx.ensure_stream_id(),
-                        ctx.model,
-                        {"content": ctx.citation_buf},
-                        created=ctx.created_at,
-                    )
-                )
-                ctx.log_downstream(sse)
-                yield sse
+                for sse in self._emit_sse(ctx, {"content": ctx.citation_buf}):
+                    yield sse
 
         # 刷出 detector 残留
         if (
@@ -996,15 +1127,17 @@ class ResponseHandler:
                     len(remaining),
                     remaining[:80],
                 )
-                sse = format_sse_chunk(
-                    create_openai_chunk(
-                        ctx.ensure_stream_id(),
-                        ctx.model,
-                        {"content": remaining},
-                        created=ctx.created_at,
-                    )
-                )
-                ctx.log_downstream(sse)
+                for sse in self._emit_sse(ctx, {"content": remaining}):
+                    yield sse
+
+        if not ctx.tool_calls_accum:
+            for sse in self._flush_turn_engine_text(
+                ctx,
+                force=True,
+                reason="post_finalize_residue",
+            ):
+                yield sse
+            for sse in self._flush_pending_reasoning(ctx):
                 yield sse
 
         # finish chunk
@@ -1056,7 +1189,7 @@ class ResponseHandler:
         tools_defs = transformed.get("tools")
         tool_strategy = transformed.get("tool_strategy", "xmlfc")
         has_tools = tool_strategy != "disabled" and bool(request.tools)
-        need_xml = tool_strategy in ("xmlfc", "hybrid") and bool(trigger_signal)
+        need_xml = tool_strategy == "xmlfc" and bool(trigger_signal)
 
         ctx = StreamContext(
             chat_id=chat_id,
@@ -1065,6 +1198,13 @@ class ResponseHandler:
             trigger_signal=trigger_signal,
             tools_defs=tools_defs,
             tool_strategy=tool_strategy,
+            turn_engine=TurnEngine(
+                TurnEngineConfig(
+                    has_tools=has_tools,
+                    strict_tool_turn=has_tools,
+                    debug_label=f"chat:{chat_id[:16]}",
+                )
+            ),
         )
 
         if need_xml:
@@ -1106,24 +1246,38 @@ class ResponseHandler:
                 if glm_extracted:
                     for sse in glm_extracted:
                         yield sse
-                    # 提取到工具调用后立即终止流，让客户端执行工具
-                    ctx.finished = True
-                    finish_chunk = create_openai_chunk(
-                        ctx.ensure_stream_id(), ctx.model, {}, "tool_calls",
-                        created=ctx.created_at,
-                    )
-                    finish_chunk["usage"] = ctx.usage_info
-                    finish_sse = format_sse_chunk(finish_chunk)
-                    ctx.log_downstream(finish_sse)
-                    yield finish_sse
-                    ctx.log_downstream("data: [DONE]")
-                    yield "data: [DONE]\n\n"
-                    return
+                    if not ctx.turn_engine or ctx.turn_engine.state == "tool_turn":
+                        # 提取到工具调用后立即终止流，让客户端执行工具
+                        ctx.finished = True
+                        finish_chunk = create_openai_chunk(
+                            ctx.ensure_stream_id(), ctx.model, {}, "tool_calls",
+                            created=ctx.created_at,
+                        )
+                        finish_chunk["usage"] = ctx.usage_info
+                        finish_sse = format_sse_chunk(finish_chunk)
+                        ctx.log_downstream(finish_sse)
+                        yield finish_sse
+                        ctx.log_downstream("data: [DONE]")
+                        yield "data: [DONE]\n\n"
+                        return
 
                 # 上游原生 tool_calls 透传（disabled 时跳过）
                 if ctx.tool_strategy != "disabled":
                     for sse in self._handle_direct_tool_calls(ctx, data):
                         yield sse
+                    if ctx.turn_engine and ctx.turn_engine.state == "tool_turn":
+                        ctx.finished = True
+                        finish_chunk = create_openai_chunk(
+                            ctx.ensure_stream_id(), ctx.model, {}, "tool_calls",
+                            created=ctx.created_at,
+                        )
+                        finish_chunk["usage"] = ctx.usage_info
+                        finish_sse = format_sse_chunk(finish_chunk)
+                        ctx.log_downstream(finish_sse)
+                        yield finish_sse
+                        ctx.log_downstream("data: [DONE]")
+                        yield "data: [DONE]\n\n"
+                        return
 
                 # GLM 内部工具调用提示
                 tool_hint = self.glm_tool_handler.process(ctx, data)
@@ -1145,8 +1299,8 @@ class ResponseHandler:
                 if not current_text:
                     continue
 
-                # Toolify 工具检测 (仅 xmlfc/hybrid)
-                if ctx.tool_strategy in ("xmlfc", "hybrid"):
+                # Toolify 工具检测 (仅 xmlfc)
+                if ctx.tool_strategy == "xmlfc":
                     detection_result = self.toolify_handler.handle_detection(
                         ctx, current_text
                     )
@@ -1160,14 +1314,28 @@ class ResponseHandler:
                         ctx, current_text
                     )
                     if parsing_result is not None:
-                        # 增补 role 和发送
-                        final_output = self.toolify_handler.inject_role_and_chunks(
-                            ctx, parsing_result
-                        )
+                        final_output = parsing_result
+                        if ctx.tool_calls_accum and ctx.turn_engine:
+                            parsed_tool_calls = list(ctx.tool_calls_accum)
+                            ctx.tool_calls_accum = []
+                            final_output = self._apply_turn_engine_actions(
+                                ctx,
+                                ctx.turn_engine.commit_tool_calls(
+                                    parsed_tool_calls,
+                                    reason="xmlfc_parse",
+                                ),
+                            )
+                        elif parsing_result:
+                            final_output = self.toolify_handler.inject_role_and_chunks(
+                                ctx, parsing_result
+                            )
                         for sse in final_output:
                             yield sse
 
-                        if ctx.tool_calls_accum:
+                        if ctx.tool_calls_accum and (
+                            not ctx.turn_engine
+                            or ctx.turn_engine.state == "tool_turn"
+                        ):
                             # 解析完成, 自带结流
                             ctx.finished = True
                             finish_chunk = create_openai_chunk(
@@ -1395,8 +1563,8 @@ class ResponseHandler:
             return handle_error(e, "非流式聚合")
 
         final_content = "".join(final_content_parts)
-        # XML 兜底提取（仅 xmlfc/hybrid）
-        if not tool_calls_accum and tool_strategy in ("xmlfc", "hybrid"):
+        # XML 兜底提取（仅 xmlfc）
+        if not tool_calls_accum and tool_strategy == "xmlfc":
             tool_calls_accum, final_content = self.toolify_handler.extract_non_stream_tool_calls(
                 final_content,
                 trigger_signal=trigger_signal,
@@ -1444,15 +1612,46 @@ class ResponseHandler:
         final_content = self._CITATION_TAIL_RE.sub("", final_content)
 
         reasoning_content = "".join(reasoning_content_parts).strip()
+        has_tools = tool_strategy != "disabled" and bool(tools_defs)
+        turn_engine = TurnEngine(
+            TurnEngineConfig(
+                has_tools=has_tools,
+                strict_tool_turn=has_tools,
+                debug_label=f"nonstream:{chat_id[:16]}",
+            )
+        )
 
-        if not final_content and reasoning_content_parts:
-            final_content = reasoning_content
+        if final_content:
+            turn_engine.buffer_text(final_content, eager=False)
+
+        resolved_content = ""
+        resolved_tool_calls: List[Dict[str, Any]] = []
+        if tool_calls_accum:
+            for action in turn_engine.commit_tool_calls(
+                tool_calls_accum,
+                reason="non_stream_tool_calls",
+            ):
+                if action.kind == "emit_tool_calls":
+                    resolved_tool_calls.extend(action.tool_calls)
+        else:
+            for action in turn_engine.flush_text(
+                force=True,
+                reason="non_stream_finalize",
+            ):
+                if action.kind == "emit_text":
+                    resolved_content += action.text
+
+        if not resolved_content and not resolved_tool_calls and reasoning_content_parts:
+            resolved_content = reasoning_content
+
+        if resolved_tool_calls:
+            reasoning_content = ""
 
         return create_openai_response_with_reasoning(
             chat_id,
             model,
-            final_content,
+            resolved_content,
             reasoning_content,
             usage_info,
-            tool_calls_accum or None,
+            resolved_tool_calls or None,
         )

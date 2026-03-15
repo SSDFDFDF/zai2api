@@ -453,3 +453,105 @@ async def wrap_claude_stream_with_logging(
             total_tokens=usage["total_tokens"],
             error_message=error_message,
         )
+
+
+async def wrap_openai_responses_stream_with_logging(
+    stream: AsyncGenerator[str, None],
+    *,
+    provider: str,
+    model: str,
+    source_info: RequestSourceInfo,
+    auth_token: Optional[str] = None,
+    upstream_auth_token: Optional[str] = None,
+    started_at: float,
+) -> AsyncGenerator[str, None]:
+    """Wrap OpenAI Responses SSE stream and persist completion metadata."""
+    success = True
+    status_code = 200
+    error_message: Optional[str] = None
+    first_token_time = 0.0
+    usage = {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_creation_tokens": 0,
+        "cache_read_tokens": 0,
+        "total_tokens": 0,
+    }
+    current_event: Optional[str] = None
+
+    try:
+        async for chunk in stream:
+            payload_text: Optional[str] = None
+
+            for line in chunk.strip().split("\n"):
+                if line.startswith("event: "):
+                    current_event = line[7:].strip()
+                elif line.startswith("data: "):
+                    payload_text = line[6:].strip()
+
+            if payload_text:
+                try:
+                    payload = json.loads(payload_text)
+                except json.JSONDecodeError:
+                    payload = None
+
+                if isinstance(payload, dict):
+                    event_type = str(payload.get("type") or current_event or "")
+                    if (
+                        not first_token_time
+                        and event_type in (
+                            "response.output_text.delta",
+                            "response.function_call_arguments.delta",
+                            "response.output_item.added",
+                        )
+                    ):
+                        first_token_time = max(
+                            0.0,
+                            time.perf_counter() - started_at,
+                        )
+
+                    if event_type == "response.failed":
+                        success = False
+                        response = payload.get("response") or {}
+                        error = response.get("error") or {}
+                        error_message = (
+                            error.get("message")
+                            or "Unknown responses stream error"
+                        )
+                        status_code = int(error.get("code") or 500)
+                    elif event_type == "response.completed":
+                        response = payload.get("response") or {}
+                        response_usage = response.get("usage") or {}
+                        input_details = response_usage.get("input_tokens_details") or {}
+                        usage = {
+                            "input_tokens": _coerce_int(response_usage.get("input_tokens")),
+                            "output_tokens": _coerce_int(response_usage.get("output_tokens")),
+                            "cache_creation_tokens": 0,
+                            "cache_read_tokens": _coerce_int(input_details.get("cached_tokens")),
+                            "total_tokens": _coerce_int(response_usage.get("total_tokens")),
+                        }
+
+            yield chunk
+    except Exception as exc:
+        success = False
+        status_code = 500
+        error_message = str(exc)
+        raise
+    finally:
+        await write_request_log(
+            provider=provider,
+            model=model,
+            source_info=source_info,
+            auth_token=auth_token,
+            upstream_auth_token=upstream_auth_token,
+            success=success,
+            started_at=started_at,
+            status_code=status_code,
+            first_token_time=first_token_time,
+            input_tokens=usage["input_tokens"],
+            output_tokens=usage["output_tokens"],
+            cache_creation_tokens=usage["cache_creation_tokens"],
+            cache_read_tokens=usage["cache_read_tokens"],
+            total_tokens=usage["total_tokens"],
+            error_message=error_message,
+        )

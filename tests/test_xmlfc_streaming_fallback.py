@@ -152,6 +152,7 @@ def test_streaming_bare_xml_falls_back_to_tool_calls():
         for tool_call in delta.get("tool_calls", []) or []:
             tool_names.append(tool_call["function"]["name"])
 
+    assert contents == []
     assert tool_names == ["Read", "Read"]
     assert "tool_calls" in finish_reasons
     assert all("<function_calls>" not in content for content in contents)
@@ -212,6 +213,30 @@ def test_streaming_triggered_args_kv_edit_tool_parses():
     assert arguments["filePath"] == "/tmp/AppShell.vue"
     assert 'label: "Dashboard"' in arguments["oldText"]
     assert 'label: "仪表盘"' in arguments["newText"]
+
+
+def test_streaming_triggered_xml_uses_regex_fallback_when_et_parse_fails():
+    chunks = [
+        'data: {"type":"chat:completion","data":{"phase":"answer","delta_content":"<Function_TEST_Start/>\\n<function_calls>\\n<function_call>\\n<tool>Read</tool>\\n<args_json><![CDATA[{\\"file_path\\": \\"/tmp/demo.txt\\"}]]></args_json>\\n<tool_response tool=\\"Read\\">broken\\n"}}',
+        'data: {"type":"chat:completion","data":{"phase":"answer","delta_content":"</function_call>\\n</function_calls>"}}',
+    ]
+
+    outputs = asyncio.run(_collect_outputs(chunks))
+    payloads = _extract_chunks(outputs)
+
+    tool_calls = []
+    finish_reason = None
+    for payload in payloads:
+        choice = payload["choices"][0]
+        finish_reason = choice.get("finish_reason") or finish_reason
+        delta = choice.get("delta", {})
+        tool_calls.extend(delta.get("tool_calls", []) or [])
+
+    assert len(tool_calls) == 1
+    assert finish_reason == "tool_calls"
+    arguments = json.loads(tool_calls[0]["function"]["arguments"])
+    assert tool_calls[0]["function"]["name"] == "Read"
+    assert arguments["file_path"] == "/tmp/demo.txt"
 
 
 class _FinalizeCtx:

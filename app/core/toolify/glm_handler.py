@@ -148,7 +148,7 @@ class GLMToolHandler:
         return None
 
     # ------------------------------------------------------------------
-    # native/hybrid: <glm_block> → OpenAI tool_calls
+    # native/glmnative: <glm_block> → OpenAI tool_calls
     # ------------------------------------------------------------------
 
     @classmethod
@@ -285,7 +285,6 @@ class GLMToolHandler:
             "[glm-native] 提取 {} 个工具调用 (block={}, delta={})",
             len(tool_calls), len(block_calls), len(delta_calls),
         )
-        ctx.tool_calls_accum.extend(tool_calls)
         output: List[str] = []
         for tc in tool_calls:
             output.extend(

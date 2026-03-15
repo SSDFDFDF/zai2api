@@ -21,6 +21,7 @@ from .xml_protocol import (
 )
 
 logger = get_logger()
+_VALID_TOOL_STRATEGIES = {"xmlfc", "native", "glmnative", "disabled"}
 
 
 @dataclass
@@ -37,13 +38,27 @@ class ToolifyPreparedRequest:
 class ToolifyRequestHandler:
     """Toolify 请求侧改写。"""
 
+    @staticmethod
+    def _resolve_tool_strategy(raw_strategy: Any) -> str:
+        strategy = str(raw_strategy or "xmlfc").strip().lower()
+        if strategy == "hybrid":
+            raise ValueError(
+                "TOOL_STRATEGY=hybrid has been removed; use xmlfc, native, glmnative, or disabled"
+            )
+        if strategy not in _VALID_TOOL_STRATEGIES:
+            raise ValueError(
+                f"Unsupported TOOL_STRATEGY={strategy!r}; expected one of "
+                f"{', '.join(sorted(_VALID_TOOL_STRATEGIES))}"
+            )
+        return strategy
+
     def prepare(
         self,
         raw_messages: List[Dict[str, Any]],
         request_tools: Any,
         tool_choice: Any,
     ) -> ToolifyPreparedRequest:
-        strategy = settings.TOOL_STRATEGY
+        strategy = self._resolve_tool_strategy(settings.TOOL_STRATEGY)
 
         if strategy == "disabled" or not request_tools:
             # disabled 或无 tools：仅做消息规范化
@@ -71,7 +86,7 @@ class ToolifyRequestHandler:
                 tool_strategy=strategy,
             )
 
-        # xmlfc / hybrid：生成 trigger_signal + XML 注入
+        # xmlfc：生成 trigger_signal + XML 注入
         tools = request_tools
         trigger_signal = generate_trigger_signal()
         logger.debug("🔧 生成 XML 触发信号: {}", trigger_signal)

@@ -11,8 +11,10 @@ from app.core.toolify.request_handler import (
     ToolifyRequestHandler,
 )
 from app.core.toolify.xml_protocol import (
+    DetectorState,
     StreamingFunctionCallDetector,
     generate_trigger_signal,
+    inspect_function_calls_block,
     looks_like_complete_function_calls,
     parse_and_extract_tool_calls,
     parse_function_calls_xml,
@@ -26,8 +28,10 @@ __all__ = [
     "ToolifyRequestHandler",
     "extract_last_user_text",
     "preprocess_openai_messages",
+    "DetectorState",
     "StreamingFunctionCallDetector",
     "generate_trigger_signal",
+    "inspect_function_calls_block",
     "looks_like_complete_function_calls",
     "parse_and_extract_tool_calls",
     "parse_function_calls_xml",

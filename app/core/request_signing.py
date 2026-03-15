@@ -192,8 +192,8 @@ def build_upstream_body(
         temperature: 采样温度，None 时不添加到 params。
         max_tokens: 最大 token 数，None 时不添加到 params。
         parent_message_id: 父消息 ID（用于链式会话）。
-        tools: native/hybrid 策略时透传的工具定义列表。
-        tool_choice: native/hybrid 策略时透传的工具选择。
+        tools: native/glmnative 策略时透传的工具定义列表。
+        tool_choice: native/glmnative 策略时透传的工具选择。
 
     Returns:
         完整的上游请求 body 字典。
@@ -241,7 +241,7 @@ def build_upstream_body(
     if mcp_servers:
         body["mcp_servers"] = mcp_servers
 
-    # native/hybrid 策略：透传 tools/tool_choice 到上游 body
+    # native/glmnative 策略：透传 tools/tool_choice 到上游 body
     if tools is not None:
         body["tools"] = tools
     if tool_choice is not None:

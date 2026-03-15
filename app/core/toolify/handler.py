@@ -18,7 +18,7 @@ from app.core.openai_compat import create_openai_chunk, format_sse_chunk
 from app.utils.logger import get_logger
 from .xml_protocol import (
     StreamingFunctionCallDetector,
-    looks_like_complete_function_calls,
+    inspect_function_calls_block,
     parse_and_extract_tool_calls,
     parse_function_calls_xml,
     validate_parsed_tools,
@@ -121,23 +121,52 @@ class ToolifyHandler:
         if "</function_calls>" not in detector.content_buffer:
             return []
 
-        if not looks_like_complete_function_calls(detector.content_buffer):
-            logger.debug("🔧 检测到 </function_calls> 但内容不完整, 继续缓冲")
+        active_trigger = (
+            str(getattr(detector, "trigger_signal", "") or "")
+            or str(getattr(ctx, "trigger_signal", "") or "")
+        )
+        allow_bare = parsing_mode == "tool_candidate"
+        inspection = inspect_function_calls_block(
+            detector.content_buffer,
+            active_trigger,
+            allow_bare=allow_bare,
+            bare_tail_only=allow_bare,
+        )
+
+        if not inspection.has_candidate:
+            if (
+                allow_bare
+                and inspection.reason == "bare_xml_has_trailing_text"
+            ):
+                logger.debug(
+                    "🔧 bare XML 候选尾部出现真实文本, 恢复为普通文本输出: {}",
+                    inspection.to_log_string(),
+                )
+                recovered = detector.reject_candidate()
+                if recovered and self.emit_func:
+                    return self.emit_func(ctx, {"content": recovered})
+                return []
+
+            logger.debug(
+                "🔧 检测到 </function_calls> 但尚无可解析块, 继续缓冲: {}",
+                inspection.to_log_string(),
+            )
             return []
 
         if (
             parsing_mode == "tool_candidate"
             and detector.content_buffer.rstrip().endswith("</function_calls>")
         ):
-            logger.debug("🔧 bare XML 候选已闭合, 等待尾部确认或流结束后再解析")
+            logger.debug(
+                "🔧 bare XML 候选已闭合, 等待尾部确认或流结束后再解析: {}",
+                inspection.to_log_string(),
+            )
             return []
 
-        logger.debug("🔧 检测到完整的 </function_calls>, 开始解析...")
-        active_trigger = (
-            str(getattr(detector, "trigger_signal", "") or "")
-            or str(getattr(ctx, "trigger_signal", "") or "")
+        logger.debug(
+            "🔧 检测到 </function_calls>, 开始解析候选块: {}",
+            inspection.to_log_string(),
         )
-        allow_bare = parsing_mode == "tool_candidate"
         parsed = parse_function_calls_xml(
             detector.content_buffer,
             active_trigger,
@@ -146,12 +175,18 @@ class ToolifyHandler:
         )
         if not parsed:
             if allow_bare:
-                logger.debug("🔧 bare XML 候选解析失败, 恢复为普通文本输出")
+                logger.debug(
+                    "🔧 bare XML 候选解析失败, 恢复为普通文本输出: {}",
+                    inspection.to_log_string(),
+                )
                 recovered = detector.reject_candidate()
                 if recovered and self.emit_func:
                     return self.emit_func(ctx, {"content": recovered})
                 return []
-            logger.warning("⚠️ 检测到 </function_calls> 但 XML 解析失败, 继续缓冲")
+            logger.warning(
+                "⚠️ 检测到 </function_calls> 但 XML 解析失败, 继续缓冲: {}",
+                inspection.to_log_string(),
+            )
             return []
 
         validation_err = validate_parsed_tools(parsed, getattr(ctx, "tools_defs", None))
@@ -167,8 +202,9 @@ class ToolifyHandler:
 
         logger.info("[tools] success detect: {} tools", len(parsed))
 
-        tc_chunks = self._build_tool_call_chunks(ctx, parsed)
-        ctx.tool_calls_accum = parsed
+        normalized = self._normalize_xml_tools(parsed)
+        tc_chunks = self._build_tool_call_chunks(ctx, normalized)
+        ctx.tool_calls_accum = normalized
         return tc_chunks
 
     def inject_role_and_chunks(
@@ -225,22 +261,24 @@ class ToolifyHandler:
                         continue
                     usable.append(call)
                 if usable:
+                    normalized = self._normalize_xml_tools(usable)
                     logger.warning(
                         "⚠️ Schema 验证失败, 仅发送 {} 个逐项校验通过的工具调用",
-                        len(usable),
+                        len(normalized),
                     )
                     self._append_tool_calls_output(
                         ctx,
                         output,
-                        self._build_tool_call_chunks(ctx, usable),
-                        usable,
+                        self._build_tool_call_chunks(ctx, normalized),
+                        normalized,
                     )
             else:
+                normalized = self._normalize_xml_tools(parsed)
                 self._append_tool_calls_output(
                     ctx,
                     output,
-                    self._build_tool_call_chunks(ctx, parsed),
-                    parsed,
+                    self._build_tool_call_chunks(ctx, normalized),
+                    normalized,
                 )
 
         if not ctx.tool_calls_accum:
@@ -362,7 +400,9 @@ class ToolifyHandler:
     def _build_tool_call_chunks(
         self, ctx: ToolifyContext, parsed_tools: List[Dict[str, Any]]
     ) -> List[str]:
-        normalized = self._normalize_xml_tools(parsed_tools)
+        normalized = parsed_tools
+        if normalized and "function" not in normalized[0]:
+            normalized = self._normalize_xml_tools(parsed_tools)
         chunks: List[str] = []
         sid = ctx.ensure_stream_id()
         for tc in normalized:

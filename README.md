@@ -67,7 +67,7 @@ docker compose -f deploy/docker-compose.yml up -d --build
 | `ADMIN_PASSWORD` | `admin123` | 管理后台登录密码，**生产环境务必修改** |
 | `ANONYMOUS_MODE` | `true` | 是否启用匿名模式（当 Token 池为空时回退 Guest 会话） |
 | `UPSTREAM_USER_NAME` | `Guest` | 上游个性化变量：用户名称 |
-| `TOOL_STRATEGY` | `xmlfc` | 工具调用策略：xmlfc / native / hybrid / glmnative / disabled |
+| `TOOL_STRATEGY` | `xmlfc` | 工具调用策略：xmlfc / native / glmnative / disabled |
 | `MAX_UPLOAD_FILE_SIZE` | `10485760` | 最大文件上传限制 (10MB) |
 | `DB_PATH` | `tokens.db` | SQLite 数据库路径 |
 

@@ -283,6 +283,8 @@ class UpstreamClient:
         enable_thinking: bool = False,
         auto_web_search: bool = False,
         mcp_servers: Optional[List[str]] = None,
+        allow_fallback: bool = True,
+        max_retries: int = 3,
     ) -> str:
         """调用 /api/v1/chats/new 预创建会话，返回服务端分配的 chat_id。
 
@@ -332,30 +334,49 @@ class UpstreamClient:
         headers["Authorization"] = f"Bearer {token}"
 
         client = self._get_shared_client()
-        try:
-            resp = await client.post(
-                f"{self.base_url}/api/v1/chats/new",
-                json=body,
-                headers=headers,
-            )
-            if resp.status_code == 200:
-                chat_id = resp.json().get("id", "")
-                if chat_id:
-                    self.logger.debug(
-                        "[chat] pre-created chat_id={}", chat_id
-                    )
-                    return chat_id
-            self.logger.warning(
-                "[chat] pre-create failed: HTTP {}, fallback to random chat_id",
-                resp.status_code,
-            )
-        except Exception as e:
-            self.logger.warning(
-                "[chat] pre-create error: {}, fallback to random chat_id", e
-            )
+        attempts = max(1, max_retries)
+        for attempt in range(attempts):
+            try:
+                resp = await client.post(
+                    f"{self.base_url}/api/v1/chats/new",
+                    json=body,
+                    headers=headers,
+                )
+                if resp.status_code == 200:
+                    chat_id = resp.json().get("id", "")
+                    if chat_id:
+                        self.logger.debug(
+                            "[chat] pre-created chat_id={}", chat_id
+                        )
+                        return chat_id
+                self.logger.warning(
+                    "[chat] pre-create failed: HTTP {} (attempt {}/{})",
+                    resp.status_code,
+                    attempt + 1,
+                    attempts,
+                )
+            except Exception as e:
+                self.logger.warning(
+                    "[chat] pre-create error: {} (attempt {}/{})",
+                    e,
+                    attempt + 1,
+                    attempts,
+                )
 
-        # 降级：使用随机 chat_id（会触发 done 阶段 INTERNAL_ERROR，但内容不受影响）
-        return generate_uuid()
+            if attempt + 1 < attempts:
+                await asyncio.sleep(min(2 ** attempt, 8))
+
+        if allow_fallback:
+            # 降级：使用随机 chat_id（会触发 done 阶段 INTERNAL_ERROR，但内容不受影响）
+            self.logger.warning(
+                "[chat] pre-create failed after {} attempts, fallback to random chat_id",
+                attempts,
+            )
+            return generate_uuid()
+
+        raise RuntimeError(
+            f"pre-create chat_id failed after {attempts} attempts"
+        )
 
     # 在线模型（缓存层保留在本类）
     # ------------------------------------------------------------------
@@ -773,7 +794,7 @@ class UpstreamClient:
                     message_id = generate_uuid()
                     parent_id = session_result.parent_id
                     is_first_turn_retry = not parent_id
-                    if tools and tool_strategy in ("xmlfc", "hybrid"):
+                    if tools and tool_strategy == "xmlfc":
                         trigger_signal = resolve_trigger_signal(
                             session_result, trigger_signal, self.logger,
                         )
@@ -816,6 +837,7 @@ class UpstreamClient:
                         enable_thinking=features["enable_thinking"],
                         auto_web_search=features["auto_web_search"],
                         mcp_servers=features.get("mcp_servers", []),
+                        allow_fallback=False,
                     )
                     parent_id = None
                     # 立即注册待确认会话（last_message_id 为空），
@@ -826,7 +848,7 @@ class UpstreamClient:
                         messages=raw_messages,
                         chat_id=chat_id,
                         message_id="",
-                        trigger_signal=trigger_signal if tools and tool_strategy in ("xmlfc", "hybrid") else "",
+                        trigger_signal=trigger_signal if tools and tool_strategy == "xmlfc" else "",
                     )
                     session_commit = {
                         "action": "reuse",
@@ -866,6 +888,7 @@ class UpstreamClient:
                         enable_thinking=features["enable_thinking"],
                         auto_web_search=features["auto_web_search"],
                         mcp_servers=features.get("mcp_servers", []),
+                        allow_fallback=False,
                     )
                 else:
                     chat_id = generate_uuid()
@@ -892,8 +915,8 @@ class UpstreamClient:
                 )
 
             # 构建请求体
-            passthrough_tools = tools if tool_strategy in ("native", "hybrid", "glmnative") else None
-            passthrough_tool_choice = tool_choice if tool_strategy in ("native", "hybrid", "glmnative") else None
+            passthrough_tools = tools if tool_strategy in ("native", "glmnative") else None
+            passthrough_tool_choice = tool_choice if tool_strategy in ("native", "glmnative") else None
             body = build_upstream_body(
                 messages=messages,
                 files=files,

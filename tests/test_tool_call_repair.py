@@ -6,9 +6,12 @@ Tests for XML/JSON Wildcard Repair Pipeline in tool_call_handler.
 
 import sys
 import os
+import pytest
 # 将项目根目录加入 sys.path, 允许直接 python 运行
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from app.core.config import settings
+from app.core.toolify.request_handler import ToolifyRequestHandler
 from app.core.toolify.xml_protocol import (
     normalize_cdata_markers,
     normalize_xml_tag_names,
@@ -20,8 +23,21 @@ from app.core.toolify.xml_protocol import (
     remove_think_blocks,
     parse_function_calls_xml,
     looks_like_complete_function_calls,
+    parse_and_extract_tool_calls,
+    remove_tool_json_content,
 )
 from app.core.toolify.message import preprocess_openai_messages
+
+
+def test_tool_strategy_hybrid_is_rejected(monkeypatch):
+    monkeypatch.setattr(settings, "TOOL_STRATEGY", "hybrid")
+
+    with pytest.raises(ValueError, match="TOOL_STRATEGY=hybrid has been removed"):
+        ToolifyRequestHandler().prepare(
+            raw_messages=[{"role": "user", "content": "hi"}],
+            request_tools=[{"type": "function", "function": {"name": "echo"}}],
+            tool_choice="auto",
+        )
 
 
 # ===========================================================================
@@ -472,6 +488,34 @@ class TestHistoricalToolCallFormatting:
         assert '<arg name="oldText">' in content
         assert '<arg name="newText">' in content
         assert '"filePath": "/tmp/AppShell.vue"' in content
+
+
+class TestLegacyJsonCompat:
+    def test_parse_and_extract_tool_calls_from_code_block(self):
+        content = """先说明
+
+```json
+{"tool_calls":[{"type":"function","function":{"name":"Read","arguments":{"file_path":"/tmp/demo.txt"}}}]}
+```
+"""
+
+        parsed, cleaned = parse_and_extract_tool_calls(content)
+        assert parsed is not None
+        assert parsed[0]["function"]["name"] == "Read"
+        assert parsed[0]["function"]["arguments"] == '{"file_path": "/tmp/demo.txt"}'
+        assert "tool_calls" not in cleaned
+
+    def test_remove_tool_json_content_keeps_non_tool_json(self):
+        content = (
+            '正文开始 {"not_tool_calls": true}\n'
+            '{"tool_calls":[{"type":"function","function":{"name":"Read","arguments":"{}"}}]}\n'
+            "正文结束"
+        )
+
+        cleaned = remove_tool_json_content(content)
+        assert '{"not_tool_calls": true}' in cleaned
+        assert '"tool_calls"' not in cleaned
+        assert "正文结束" in cleaned
 
 
 # ===========================================================================
