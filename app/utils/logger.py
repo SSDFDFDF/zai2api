@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import logging
+import os
 import sys
 
 logger = logging.getLogger("zai2api")
@@ -16,8 +17,11 @@ _handler.setFormatter(logging.Formatter(
 logger.addHandler(_handler)
 
 
-def setup_logger(debug_mode=False):
-    """Reconfigure logger (used by admin hot-reload)."""
+def setup_logger(log_dir=None, debug_mode=False):
+    """Configure and return the shared application logger.
+
+    `log_dir` is accepted for backward compatibility with older startup code.
+    """
     logger.setLevel(logging.DEBUG if debug_mode else logging.INFO)
     fmt = (
         "%(asctime)s | %(levelname)-8s | %(name)s:%(funcName)s:%(lineno)d | %(message)s"
@@ -27,3 +31,6 @@ def setup_logger(debug_mode=False):
     datefmt = "%Y-%m-%d %H:%M:%S" if debug_mode else "%H:%M:%S"
     for h in logger.handlers:
         h.setFormatter(logging.Formatter(fmt, datefmt=datefmt))
+    if log_dir:
+        os.makedirs(log_dir, exist_ok=True)
+    return logger
