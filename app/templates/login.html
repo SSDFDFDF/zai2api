@@ -11,6 +11,9 @@
 
     <!-- Alpine.js (CDN) -->
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
 
     <style>
         .gradient-bg {
@@ -20,6 +23,14 @@
 </head>
 
 <body class="h-full">
+    <script>
+        window.ADMIN_ROOT_PATH = {{ root_path|tojson }};
+        window.adminPath = function (path) {
+            const base = String(window.ADMIN_ROOT_PATH || '').replace(/\/$/, '');
+            const suffix = String(path || '').startsWith('/') ? path : `/${path || ''}`;
+            return `${base}${suffix}`;
+        };
+    </script>
     <div class="min-h-full flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
         <div class="max-w-md w-full space-y-8">
             <!-- Logo 和标题 -->
@@ -53,7 +64,7 @@
                          this.error = '';
 
                          try {
-                             const response = await fetch('/admin/api/login', {
+                             const response = await fetch(window.adminPath('/admin/api/login'), {
                                  method: 'POST',
                                  headers: {
                                      'Content-Type': 'application/json',
@@ -64,7 +75,7 @@
                              const data = await response.json();
 
                              if (response.ok && data.success) {
-                                 window.location.href = '/admin';
+                                 window.location.href = window.adminPath('/admin');
                              } else {
                                  this.error = data.message || '密码错误，请重试';
                              }

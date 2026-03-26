@@ -499,7 +499,7 @@
 
         try {
             const response = await fetch(
-                `/admin/api/dashboard/usage-trend?window=${encodeURIComponent(nextWindow)}`,
+                window.adminPath(`/admin/api/dashboard/usage-trend?window=${encodeURIComponent(nextWindow)}`),
                 {
                     headers: {
                         'X-Requested-With': 'XMLHttpRequest'

@@ -78,7 +78,7 @@
     <!-- 操作 -->
     <td class="px-6 py-3 whitespace-nowrap text-right text-sm font-medium">
         <div class="flex items-center justify-end space-x-1">
-            <button hx-post="/admin/api/tokens/toggle/{{ token.id }}?enabled={{ 'false' if token.is_enabled else 'true' }}"
+            <button hx-post="{{ request.scope.get('root_path', '') }}/admin/api/tokens/toggle/{{ token.id }}?enabled={{ 'false' if token.is_enabled else 'true' }}"
                 hx-swap="outerHTML"
                 class="p-1 rounded-md transition-all {{ 'text-emerald-600 hover:bg-emerald-50' if token.is_enabled else 'text-slate-400 hover:bg-slate-100' }}"
                 title="{{ '点击禁用' if token.is_enabled else '点击启用' }}">
@@ -91,7 +91,7 @@
                 </svg>
             </button>
 
-            <button hx-post="/admin/api/tokens/validate-single/{{ token.id }}" hx-target="#token-row-{{ token.id }}"
+            <button hx-post="{{ request.scope.get('root_path', '') }}/admin/api/tokens/validate-single/{{ token.id }}" hx-target="#token-row-{{ token.id }}"
                 hx-swap="outerHTML" hx-indicator="#validate-spinner-{{ token.id }}"
                 class="p-1 text-blue-600 hover:bg-blue-50 rounded-md transition-all relative validate-token-btn" title="手动检测">
                 <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -103,7 +103,7 @@
                 </svg>
             </button>
 
-            <button hx-delete="/admin/api/tokens/delete/{{ token.id }}" hx-target="#token-row-{{ token.id }}"
+            <button hx-delete="{{ request.scope.get('root_path', '') }}/admin/api/tokens/delete/{{ token.id }}" hx-target="#token-row-{{ token.id }}"
                 hx-swap="outerHTML swap:1s"
                 hx-confirm="确定删除？" 
                 class="p-1 text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-md transition-all"

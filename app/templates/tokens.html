@@ -77,7 +77,7 @@
         <!-- 统计与策略 Tab -->
         <div x-show="activeTab === 'strategy'" class="h-full overflow-y-auto space-y-6 pb-6">
             <!-- 统计面板 -->
-            <div id="token-stats" hx-get="/admin/api/tokens/stats" hx-trigger="load, statsRefresh from:body"
+            <div id="token-stats" hx-get="{{ root_path }}/admin/api/tokens/stats" hx-trigger="load, statsRefresh from:body"
                 hx-swap="innerHTML">
                 <!-- 加载中 -->
                 <div class="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
@@ -133,7 +133,7 @@
                     </dl>
 
                     <div class="flex flex-wrap gap-3 pt-2">
-                        <button type="button" hx-post="/admin/api/tokens/import-directory" hx-target="#notification"
+                        <button type="button" hx-post="{{ root_path }}/admin/api/tokens/import-directory" hx-target="#notification"
                             @htmx:before-request="isImporting = true"
                             @htmx:after-request="isImporting = false; if ($event.detail.successful) { htmx.trigger('body', 'tokenListRefresh'); htmx.trigger('body', 'statsRefresh'); }"
                             :disabled="isImporting || !hasImportSourceDir"
@@ -188,7 +188,7 @@
                     </dl>
 
                     <div class="flex flex-wrap gap-3 pt-2">
-                        <button type="button" hx-post="/admin/api/tokens/maintenance/run" hx-target="#notification"
+                        <button type="button" hx-post="{{ root_path }}/admin/api/tokens/maintenance/run" hx-target="#notification"
                             @htmx:before-request="isRunningMaintenance = true"
                             @htmx:after-request="isRunningMaintenance = false; if ($event.detail.successful) { htmx.trigger('body', 'tokenListRefresh'); htmx.trigger('body', 'statsRefresh'); }"
                             :disabled="isRunningMaintenance || !hasMaintenanceActions"
@@ -208,7 +208,7 @@
                     <p class="mt-1 text-xs text-gray-500">页面加载只展示配置与最近请求统计，不会主动探测 Token 可用性；检测仅在手动点击后执行。</p>
                 </div>
                 <div class="flex items-center space-x-4">
-                    <button hx-post="/admin/api/tokens/sync-pool" hx-target="#notification"
+                    <button hx-post="{{ root_path }}/admin/api/tokens/sync-pool" hx-target="#notification"
                         class="text-sm text-purple-600 hover:text-purple-700 flex items-center transition-colors">
                         <svg class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -216,7 +216,7 @@
                         </svg>
                         同步 Token 池
                     </button>
-                    <button hx-post="/admin/api/tokens/health-check" hx-target="#notification"
+                    <button hx-post="{{ root_path }}/admin/api/tokens/health-check" hx-target="#notification"
                         class="text-sm text-blue-600 hover:text-blue-700 flex items-center transition-colors">
                         <svg class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -226,7 +226,7 @@
                     </button>
                 </div>
             </div>
-            <div id="token-list" hx-get="/admin/api/tokens/list?page=1&page_size=20" hx-trigger="load" hx-swap="innerHTML" class="flex-1 overflow-auto">
+            <div id="token-list" hx-get="{{ root_path }}/admin/api/tokens/list?page=1&page_size=20" hx-trigger="load" hx-swap="innerHTML" class="flex-1 overflow-auto">
                 <div class="flex justify-center items-center py-12">
                     <svg class="animate-spin h-8 w-8 text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -303,7 +303,7 @@
                         <label class="block text-sm font-medium text-gray-700 mb-2">上传 Token JSON 文件</label>
                         <div
                             class="border-2 border-dashed border-gray-300 rounded-lg p-4 hover:border-indigo-400 transition-colors">
-                            <form id="upload-form" hx-post="/admin/api/tokens/import-upload" hx-target="#notification"
+                            <form id="upload-form" hx-post="{{ root_path }}/admin/api/tokens/import-upload" hx-target="#notification"
                                 hx-encoding="multipart/form-data" @htmx:before-request="isUploading = true"
                                 @htmx:after-request="isUploading = false; if ($event.detail.successful) { htmx.trigger('body', 'tokenListRefresh'); htmx.trigger('body', 'statsRefresh'); } document.getElementById('upload-file-input').value = ''; document.getElementById('upload-file-info').textContent = '未选择文件'">
                                 <div class="text-center">
@@ -353,7 +353,7 @@
                             class="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50">
                             取消
                         </button>
-                        <button hx-post="/admin/api/tokens/add" :hx-vals="JSON.stringify({
+                        <button hx-post="{{ root_path }}/admin/api/tokens/add" :hx-vals="JSON.stringify({
                                 single_token: newToken,
                                 bulk_tokens: bulkTokens
                             })" hx-target="#notification"
@@ -435,7 +435,7 @@
                             class="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed">
                             取消
                         </button>
-                        <button hx-post="/admin/api/tokens/validate" hx-target="#notification"
+                        <button hx-post="{{ root_path }}/admin/api/tokens/validate" hx-target="#notification"
                             @htmx:before-request="isValidating = true; document.getElementById('validate-progress').classList.remove('hidden')"
                             @htmx:after-request="isValidating = false; showValidateModal = false; document.getElementById('validate-progress').classList.add('hidden'); htmx.trigger('body', 'tokenListRefresh'); htmx.trigger('body', 'statsRefresh')"
                             :disabled="isValidating"
@@ -458,7 +458,7 @@
     function loadTokenListPage(page) {
         const nextPage = Math.max(1, Number(page) || 1);
         window.tokenListPage = nextPage;
-        const url = `/admin/api/tokens/list?page=${nextPage}&page_size=${window.tokenListPageSize}`;
+        const url = window.adminPath(`/admin/api/tokens/list?page=${nextPage}&page_size=${window.tokenListPageSize}`);
         htmx.ajax('GET', url, {
             target: '#token-list',
             swap: 'innerHTML'

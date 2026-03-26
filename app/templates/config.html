@@ -97,7 +97,7 @@
             </p>
         </div>
         <div class="flex flex-wrap gap-3">
-            <button type="button" hx-post="/admin/api/config/save" hx-include="#main-config-form"
+            <button type="button" hx-post="{{ root_path }}/admin/api/config/save" hx-include="#main-config-form"
                 hx-target="#config-feedback" hx-swap="innerHTML"
                 class="px-4 py-2 bg-slate-800 text-white rounded-md text-sm font-medium hover:bg-slate-700 flex items-center">
                 <svg class="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -113,7 +113,7 @@
     <div id="config-feedback"></div>
 
     <!-- Main Config Form -->
-    <form id="main-config-form" hx-post="/admin/api/config/save" hx-target="#config-feedback" hx-swap="innerHTML"
+    <form id="main-config-form" hx-post="{{ root_path }}/admin/api/config/save" hx-target="#config-feedback" hx-swap="innerHTML"
         class="space-y-8" x-data="{ activeTab: '{{ sections[0].id }}' }">
 
         <!-- Mobile & Desktop Tab Navigation -->
@@ -178,7 +178,7 @@
                             </div>
                         </div>
                         <button
-                            hx-post="/admin/api/models/refresh"
+                            hx-post="{{ root_path }}/admin/api/models/refresh"
                             hx-target="#config-feedback"
                             hx-swap="innerHTML"
                             @htmx:before-request="isRefreshing = true"

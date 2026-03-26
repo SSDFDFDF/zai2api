@@ -2,7 +2,6 @@
 管理后台路由模块
 """
 from datetime import datetime
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
@@ -20,19 +19,38 @@ from app.utils.logger import logger
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 DEFAULT_TOKEN_NAMESPACE = "zai"
-LOGIN_TEMPLATE_PATH = Path(__file__).resolve().parent.parent / "templates" / "login.html"
+
+
+def _page_headers() -> dict[str, str]:
+    return {
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0",
+    }
+
+
+def _base_context(request: Request) -> dict:
+    return {
+        "request": request,
+        "root_path": request.scope.get("root_path", ""),
+    }
 
 
 @router.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     """登录页面"""
     try:
-        return HTMLResponse(LOGIN_TEMPLATE_PATH.read_text(encoding="utf-8"))
+        return templates.TemplateResponse(
+            "login.html",
+            _base_context(request),
+            headers=_page_headers(),
+        )
     except Exception:
-        logger.exception("渲染管理后台登录页失败: %s", LOGIN_TEMPLATE_PATH)
+        logger.exception("渲染管理后台登录页失败")
         return HTMLResponse(
             "<h1>Admin login page failed to render</h1>",
             status_code=500,
+            headers=_page_headers(),
         )
 
 
@@ -47,13 +65,13 @@ async def dashboard(request: Request):
         stats["uptime"] = get_process_uptime()
 
         context = {
-            "request": request,
+            **_base_context(request),
             "stats": stats,
             "current_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "trend_windows": TREND_WINDOW_OPTIONS,
         }
 
-        return templates.TemplateResponse("index.html", context)
+        return templates.TemplateResponse("index.html", context, headers=_page_headers())
     except Exception:
         logger.exception("渲染管理后台仪表盘失败")
         raise
@@ -108,7 +126,7 @@ async def config_page(request: Request):
             pass
 
         context = {
-            "request": request,
+            **_base_context(request),
             "sections": page_data["sections"],
             "env_content": page_data["env_content"],
             "overview": page_data["overview"],
@@ -116,7 +134,7 @@ async def config_page(request: Request):
             "model_parsed": model_parsed,
             "model_count": len(model_list),
         }
-        return templates.TemplateResponse("config.html", context)
+        return templates.TemplateResponse("config.html", context, headers=_page_headers())
     except Exception:
         logger.exception("渲染管理后台配置页失败")
         raise
@@ -126,7 +144,11 @@ async def config_page(request: Request):
 async def request_logs_page(request: Request):
     """请求日志页面"""
     try:
-        return templates.TemplateResponse("request_logs.html", {"request": request})
+        return templates.TemplateResponse(
+            "request_logs.html",
+            _base_context(request),
+            headers=_page_headers(),
+        )
     except Exception:
         logger.exception("渲染管理后台请求日志页失败")
         raise
@@ -151,9 +173,9 @@ async def tokens_page(request: Request):
             maintenance_actions.append("删除失效 Token")
 
         context = {
-            "request": request,
+            **_base_context(request),
             "automation": {
-                "config_url": "/admin/config#tokens",
+                "config_url": f"{request.scope.get('root_path', '')}/admin/config#tokens",
                 "import_enabled": settings.TOKEN_AUTO_IMPORT_ENABLED,
                 "import_source_dir": settings.TOKEN_AUTO_IMPORT_SOURCE_DIR,
                 "import_interval": settings.TOKEN_AUTO_IMPORT_INTERVAL,
@@ -166,7 +188,7 @@ async def tokens_page(request: Request):
                 "has_maintenance_actions": bool(maintenance_actions),
             },
         }
-        return templates.TemplateResponse("tokens.html", context)
+        return templates.TemplateResponse("tokens.html", context, headers=_page_headers())
     except Exception:
         logger.exception("渲染管理后台 Token 页失败")
         raise

@@ -15,6 +15,9 @@
 
     <!-- htmx (CDN) -->
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
 
     <!-- 自定义样式 -->
     <style>
@@ -79,14 +82,14 @@
         if (confirm('确定要登出吗？')) {
             try {
                 const csrfToken = window.getAdminCsrfToken ? window.getAdminCsrfToken() : '';
-                const response = await fetch('/admin/api/logout', {
+                const response = await fetch(window.adminPath('/admin/api/logout'), {
                     method: 'POST',
                     headers: {
                         'X-CSRF-Token': csrfToken
                     }
                 });
                 if (response.ok) {
-                    window.location.href = '/admin/login';
+                    window.location.href = window.adminPath('/admin/login');
                 }
             } catch (err) {
                 console.error('登出失败:', err);
@@ -150,7 +153,7 @@
                     {% set current_path = request.url.path %}
 
                     <!-- 仪表盘 -->
-                    <a href="/admin"
+                    <a href="{{ root_path }}/admin"
                         class="{% if current_path == '/admin' or current_path == '/admin/' %}bg-slate-100 text-indigo-700{% else %}text-gray-700 hover:bg-gray-100{% endif %} group flex items-center px-3 py-2 text-sm font-medium rounded-md">
                         <svg class="mr-3 h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -160,7 +163,7 @@
                     </a>
 
                     <!-- 请求日志 -->
-                    <a href="/admin/request-logs"
+                    <a href="{{ root_path }}/admin/request-logs"
                         class="{% if '/request-logs' in current_path %}bg-slate-100 text-indigo-700{% else %}text-gray-700 hover:bg-gray-100{% endif %} group flex items-center px-3 py-2 text-sm font-medium rounded-md">
                         <svg class="mr-3 h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -170,7 +173,7 @@
                     </a>
 
                     <!-- 配置管理 -->
-                    <a href="/admin/config"
+                    <a href="{{ root_path }}/admin/config"
                         class="{% if '/config' in current_path %}bg-slate-100 text-indigo-700{% else %}text-gray-700 hover:bg-gray-100{% endif %} group flex items-center px-3 py-2 text-sm font-medium rounded-md">
                         <svg class="mr-3 h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -182,7 +185,7 @@
                     </a>
 
                     <!-- Token 管理 -->
-                    <a href="/admin/tokens"
+                    <a href="{{ root_path }}/admin/tokens"
                         class="{% if '/tokens' in current_path %}bg-slate-100 text-indigo-700{% else %}text-gray-700 hover:bg-gray-100{% endif %} group flex items-center px-3 py-2 text-sm font-medium rounded-md">
                         <svg class="mr-3 h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -195,7 +198,7 @@
                     <div class="border-t border-gray-200 my-4"></div>
 
                     <!-- API 文档 -->
-                    <a href="/docs" target="_blank"
+                    <a href="{{ root_path }}/docs" target="_blank"
                         class="text-gray-700 hover:bg-gray-100 group flex items-center px-3 py-2 text-sm font-medium rounded-md">
                         <svg class="mr-3 h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -220,6 +223,13 @@
     </div>
 
     <script>
+        window.ADMIN_ROOT_PATH = {{ root_path|tojson }};
+        window.adminPath = function (path) {
+            const base = String(window.ADMIN_ROOT_PATH || '').replace(/\/$/, '');
+            const suffix = String(path || '').startsWith('/') ? path : `/${path || ''}`;
+            return `${base}${suffix}`;
+        };
+
         function getCookieValue(name) {
             const cookies = document.cookie.split('; ');
             for (const cookie of cookies) {
