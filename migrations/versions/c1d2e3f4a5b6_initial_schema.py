@@ -1,26 +1,22 @@
-"""baseline current schema
+"""initial schema
 
-Revision ID: 9a6b3d4c2e11
+Revision ID: c1d2e3f4a5b6
 Revises:
-Create Date: 2026-03-14 10:30:00.000000
-This is the single retained migration baseline.
-
+Create Date: 2026-03-26 10:40:00.000000
 """
-from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = "9a6b3d4c2e11"
-down_revision: Union[str, Sequence[str], None] = None
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+revision = "c1d2e3f4a5b6"
+down_revision = None
+branch_labels = None
+depends_on = None
 
 
 def upgrade() -> None:
-    """Upgrade schema."""
     op.create_table(
         "config_items",
         sa.Column("key", sa.String(), nullable=False),
@@ -36,6 +32,7 @@ def upgrade() -> None:
         sa.Column("protocol", sa.String(), server_default="unknown", nullable=False),
         sa.Column("client_name", sa.String(), server_default="Unknown", nullable=False),
         sa.Column("auth_token", sa.Text(), nullable=True),
+        sa.Column("upstream_auth_token", sa.Text(), nullable=True),
         sa.Column("model", sa.String(), nullable=False),
         sa.Column("status_code", sa.Integer(), server_default=sa.text("200"), nullable=False),
         sa.Column("success", sa.Boolean(), nullable=False),
@@ -49,6 +46,10 @@ def upgrade() -> None:
         sa.Column("error_message", sa.Text(), nullable=True),
         sa.Column("timestamp", sa.DateTime(), server_default=sa.func.now(), nullable=False),
         sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_index("ix_request_logs_timestamp", "request_logs", ["timestamp"], unique=False)
+    op.create_index(
+        "ix_request_logs_provider_timestamp", "request_logs", ["provider", "timestamp"], unique=False
     )
     op.create_table(
         "tokens",
@@ -79,7 +80,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Downgrade schema."""
+    op.drop_index("ix_request_logs_provider_timestamp", table_name="request_logs")
+    op.drop_index("ix_request_logs_timestamp", table_name="request_logs")
     op.drop_table("token_stats")
     op.drop_table("tokens")
     op.drop_table("request_logs")
