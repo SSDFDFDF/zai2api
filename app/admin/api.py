@@ -10,7 +10,6 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, Request, UploadFile, File
 from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.templating import Jinja2Templates
 
 from app.admin.auth import (
     CSRF_COOKIE_NAME,
@@ -29,13 +28,13 @@ from app.admin.config_manager import (
     save_source_config,
 )
 from app.admin.stats import collect_admin_stats, normalize_trend_window
+from app.admin.template_loader import templates
 from app.services.request_log_dao import get_request_log_dao
 from app.utils.format import format_compact_number
 from app.utils.logger import logger
 from app.utils.utlis import mask_token
 
 router = APIRouter(prefix="/admin/api", tags=["admin-api"])
-templates = Jinja2Templates(directory="app/templates")
 DEFAULT_TOKEN_NAMESPACE = "zai"
 
 

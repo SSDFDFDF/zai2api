@@ -5,7 +5,6 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
 
 from app.admin.auth import require_auth
 from app.admin.config_manager import build_config_page_data
@@ -15,9 +14,9 @@ from app.admin.stats import (
     collect_admin_stats,
     get_process_uptime,
 )
+from app.admin.template_loader import templates
 
 router = APIRouter(prefix="/admin", tags=["admin"])
-templates = Jinja2Templates(directory="app/templates")
 DEFAULT_TOKEN_NAMESPACE = "zai"
 
 
