@@ -3,6 +3,7 @@ from datetime import datetime
 from urllib.parse import urlencode
 
 import pytest
+from jinja2 import Environment, FileSystemLoader
 from starlette.requests import Request
 
 from app.admin import api as admin_api
@@ -588,3 +589,60 @@ async def test_sync_token_stats_to_db_flushes_async_queue_without_double_countin
 def test_format_uptime_formats_seconds_minutes_and_hours():
     assert format_uptime(59) == "59秒"
     assert format_uptime(3661) == "1小时 1分钟 1秒"
+
+
+def test_dashboard_template_seeds_trend_window_state():
+    env = Environment(loader=FileSystemLoader("app/templates"))
+    template = env.get_template("index.html")
+
+    rendered = template.render(
+        request=_make_get_request("/admin"),
+        root_path="",
+        current_time="2026-03-26 12:00:00",
+        trend_windows=(
+            {"key": "24h", "label": "24 小时"},
+            {"key": "7d", "label": "7 天"},
+            {"key": "30d", "label": "30 天"},
+        ),
+        stats={
+            "total_requests": 12,
+            "successful_requests": 10,
+            "failed_requests": 2,
+            "success_rate": 83.3,
+            "total_consumed_tokens": 1234,
+            "total_consumed_tokens_display": "1,234",
+            "total_cache_tokens_display": "345",
+            "average_latency": 0.56,
+            "average_first_token_latency": 0.12,
+            "healthy_tokens": 3,
+            "pool_total_tokens": 4,
+            "available_tokens": 3,
+            "enabled_tokens": 4,
+            "user_tokens": 4,
+            "cache_creation_requests": 2,
+            "cache_creation_tokens": 120,
+            "cache_hit_requests": 3,
+            "cache_read_tokens": 225,
+            "input_tokens": 700,
+            "input_tokens_display": "700",
+            "output_tokens": 534,
+            "output_tokens_display": "534",
+            "uptime": "1小时 2分钟 3秒",
+            "trend_window": "7d",
+            "usage_trend": [
+                {
+                    "label": "03-26",
+                    "tooltip_label": "2026-03-26",
+                    "total_requests": 12,
+                    "input_tokens": 700,
+                    "output_tokens": 534,
+                    "cache_creation_tokens": 120,
+                    "cache_read_tokens": 225,
+                }
+            ],
+        },
+    )
+
+    assert "const trendWindowDescriptions = Object.freeze" in rendered
+    assert 'window.dashboardTrendWindow = "7d";' in rendered
+    assert '"tooltip_label": "2026-03-26"' in rendered

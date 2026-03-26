@@ -319,7 +319,11 @@ async def get_token_pool_status(request: Request):
             "request": request,
             "tokens": [],
         }
-        return templates.TemplateResponse("components/token_pool.html", context)
+        return templates.TemplateResponse(
+            request,
+            "components/token_pool.html",
+            context,
+        )
 
     # 获取 token 状态统计
     pool_status = await token_pool.get_pool_status()
@@ -364,7 +368,11 @@ async def get_token_pool_status(request: Request):
         "tokens": tokens_info,
     }
 
-    return templates.TemplateResponse("components/token_pool.html", context)
+    return templates.TemplateResponse(
+        request,
+        "components/token_pool.html",
+        context,
+    )
 
 
 @router.get(
@@ -476,7 +484,11 @@ async def get_recent_logs(request: Request):
         "page": pagination,
     }
 
-    return templates.TemplateResponse("components/recent_logs.html", context)
+    return templates.TemplateResponse(
+        request,
+        "components/recent_logs.html",
+        context,
+    )
 
 
 @router.post(
@@ -646,7 +658,11 @@ async def get_tokens_list(request: Request):
         "page": pagination,
     }
 
-    return templates.TemplateResponse("components/token_list.html", context)
+    return templates.TemplateResponse(
+        request,
+        "components/token_list.html",
+        context,
+    )
 
 
 @router.post(
@@ -1064,7 +1080,11 @@ async def get_tokens_stats(request: Request):
         "stats": stats_data,
     }
 
-    return templates.TemplateResponse("components/token_stats.html", context)
+    return templates.TemplateResponse(
+        request,
+        "components/token_stats.html",
+        context,
+    )
 
 
 @router.post(
@@ -1136,7 +1156,11 @@ async def validate_single_token(request: Request, token_id: int):
             "token": token,
         }
         # 使用单行模板渲染
-        return templates.TemplateResponse("components/token_row.html", context)
+        return templates.TemplateResponse(
+            request,
+            "components/token_row.html",
+            context,
+        )
     else:
         return HTMLResponse("")
 

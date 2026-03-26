@@ -41,6 +41,7 @@ async def login_page(request: Request):
     """登录页面"""
     try:
         return templates.TemplateResponse(
+            request,
             "login.html",
             _base_context(request),
             headers=_page_headers(),
@@ -71,7 +72,12 @@ async def dashboard(request: Request):
             "trend_windows": TREND_WINDOW_OPTIONS,
         }
 
-        return templates.TemplateResponse("index.html", context, headers=_page_headers())
+        return templates.TemplateResponse(
+            request,
+            "index.html",
+            context,
+            headers=_page_headers(),
+        )
     except Exception:
         logger.exception("渲染管理后台仪表盘失败")
         raise
@@ -134,7 +140,12 @@ async def config_page(request: Request):
             "model_parsed": model_parsed,
             "model_count": len(model_list),
         }
-        return templates.TemplateResponse("config.html", context, headers=_page_headers())
+        return templates.TemplateResponse(
+            request,
+            "config.html",
+            context,
+            headers=_page_headers(),
+        )
     except Exception:
         logger.exception("渲染管理后台配置页失败")
         raise
@@ -145,6 +156,7 @@ async def request_logs_page(request: Request):
     """请求日志页面"""
     try:
         return templates.TemplateResponse(
+            request,
             "request_logs.html",
             _base_context(request),
             headers=_page_headers(),
@@ -188,7 +200,12 @@ async def tokens_page(request: Request):
                 "has_maintenance_actions": bool(maintenance_actions),
             },
         }
-        return templates.TemplateResponse("tokens.html", context, headers=_page_headers())
+        return templates.TemplateResponse(
+            request,
+            "tokens.html",
+            context,
+            headers=_page_headers(),
+        )
     except Exception:
         logger.exception("渲染管理后台 Token 页失败")
         raise

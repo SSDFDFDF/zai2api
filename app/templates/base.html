@@ -223,7 +223,7 @@
     </div>
 
     <script>
-        window.ADMIN_ROOT_PATH = {{ root_path|tojson }};
+        window.ADMIN_ROOT_PATH = {{ root_path|default('', true)|tojson }};
         window.adminPath = function (path) {
             const base = String(window.ADMIN_ROOT_PATH || '').replace(/\/$/, '');
             const suffix = String(path || '').startsWith('/') ? path : `/${path || ''}`;

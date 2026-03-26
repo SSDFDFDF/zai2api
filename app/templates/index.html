@@ -263,6 +263,15 @@
 
 {% block extra_scripts %}
 <script>
+    const trendWindowDescriptions = Object.freeze({
+        '24h': '最近 24 小时按小时聚合的请求量、输入输出与缓存变化。',
+        '7d': '最近 7 天按天聚合的请求量、输入输出与缓存变化。',
+        '30d': '最近 30 天按天聚合的请求量、输入输出与缓存变化。'
+    });
+
+    window.dashboardTrendWindow = {{ stats.trend_window|default('7d', true)|tojson }};
+    window.dashboardTrendData = {{ stats.usage_trend|default([], true)|tojson }};
+
     function updateTime() {
         const now = new Date();
         document.getElementById('last-update').textContent = now.toLocaleString('zh-CN');
