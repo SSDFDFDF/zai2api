@@ -29,9 +29,10 @@ from app.admin.config_manager import (
 )
 from app.admin.stats import collect_admin_stats, normalize_trend_window
 from app.admin.template_loader import templates
+from app.core.config import settings
 from app.services.request_log_dao import get_request_log_dao
 from app.utils.format import format_compact_number
-from app.utils.logger import logger
+from app.utils.logger import DEFAULT_LOG_DIR, logger, resolve_log_file_path
 from app.utils.utlis import mask_token
 
 router = APIRouter(prefix="/admin/api", tags=["admin-api"])
@@ -99,7 +100,7 @@ async def login(request: Request):
             }, status_code=401)
 
     except Exception as e:
-        logger.error(f"❌ 登录异常: {e}")
+        logger.exception("❌ 登录异常")
         return JSONResponse({
             "success": False,
             "message": "登录失败"
@@ -148,7 +149,7 @@ async def reload_settings():
     await apply_db_overrides(settings)
 
     # 重新初始化 logger（使用新的 DEBUG_LOGGING 配置）
-    setup_logger(debug_mode=settings.DEBUG_LOGGING)
+    setup_logger(log_dir=DEFAULT_LOG_DIR, debug_mode=settings.DEBUG_LOGGING)
 
     logger.info(f"🔄 配置已热重载 (DEBUG_LOGGING={settings.DEBUG_LOGGING})")
 
@@ -266,6 +267,27 @@ def _humanize_protocol(protocol: str) -> str:
     return normalized or "Unknown"
 
 
+def _read_log_tail(log_path: Path, max_bytes: int) -> tuple[str, bool, int]:
+    if not log_path.exists() or not log_path.is_file():
+        return "", False, 0
+
+    file_size = log_path.stat().st_size
+    read_size = min(file_size, max(1024, max_bytes))
+
+    with log_path.open("rb") as fh:
+        if file_size > read_size:
+            fh.seek(file_size - read_size)
+        data = fh.read(read_size)
+
+    truncated = file_size > read_size
+    if truncated:
+        first_newline = data.find(b"\n")
+        if first_newline >= 0:
+            data = data[first_newline + 1 :]
+
+    return data.decode("utf-8", errors="replace"), truncated, file_size
+
+
 @router.get(
     "/dashboard/usage-trend",
     response_class=JSONResponse,
@@ -286,6 +308,39 @@ async def get_dashboard_usage_trend(request: Request):
             "window": trend_window,
             "points": trend_points,
         }
+    )
+
+
+@router.get(
+    "/runtime-log-tail",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_auth)],
+)
+async def get_runtime_log_tail(request: Request):
+    """返回运行日志文件尾部内容。"""
+    max_bytes = _get_int_query_param(
+        request,
+        "max_bytes",
+        65536,
+        minimum=4096,
+        maximum=262144,
+    )
+    log_path = resolve_log_file_path(settings.LOG_FILE_PATH, log_dir=DEFAULT_LOG_DIR)
+
+    text, truncated, file_size = _read_log_tail(log_path, max_bytes)
+    context = {
+        "request": request,
+        "log_path": str(log_path),
+        "content": text,
+        "truncated": truncated,
+        "file_size": file_size,
+        "max_bytes": max_bytes,
+        "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    return templates.TemplateResponse(
+        request,
+        "components/runtime_log_tail.html",
+        context,
     )
 
 
@@ -520,7 +575,7 @@ async def save_config(request: Request):
             status_code=200,  # return 200 so HTMX swaps the feedback
         )
     except Exception as exc:
-        logger.error(f"❌ 配置保存失败: {exc}")
+        logger.exception("❌ 配置保存失败")
         return _build_alert(
             f"保存失败: {exc}",
             title="错误！",
@@ -558,7 +613,7 @@ async def save_config_source(request: Request):
             status_code=400,
         )
     except Exception as exc:
-        logger.error(f"❌ 源文件保存失败: {exc}")
+        logger.exception("❌ 源文件保存失败")
         return _build_alert(
             f"源文件保存失败: {exc}",
             title="错误！",
@@ -593,7 +648,7 @@ async def reset_config():
             status_code=404,
         )
     except Exception as exc:
-        logger.error(f"❌ 配置重置失败: {exc}")
+        logger.exception("❌ 配置重置失败")
         return _build_alert(
             f"重置失败: {exc}",
             title="错误！",
@@ -790,7 +845,7 @@ async def import_tokens_from_directory_api(request: Request):
             status_code=409,
         )
     except Exception as exc:
-        logger.exception(f"❌ 本地目录导入 Token 失败: {exc}")
+        logger.exception("❌ 本地目录导入 Token 失败")
         return _build_alert(
             f"目录扫描或入库异常: {exc}",
             title="导入失败！",
@@ -872,7 +927,7 @@ async def import_tokens_from_upload_api(
             validate=True,
         )
     except Exception as exc:
-        logger.exception(f"❌ 上传 JSON 文件导入 Token 失败: {exc}")
+        logger.exception("❌ 上传 JSON 文件导入 Token 失败")
         return _build_alert(
             f"文件解析或入库异常: {exc}",
             title="导入失败！",
@@ -976,7 +1031,7 @@ async def run_token_maintenance_api(request: Request):
             status_code=409,
         )
     except Exception as exc:
-        logger.exception(f"❌ 手动执行 Token 维护失败: {exc}")
+        logger.exception("❌ 手动执行 Token 维护失败")
         return _build_alert(
             f"Token 维护失败: {exc}",
             title="维护失败！",
@@ -1287,7 +1342,7 @@ async def refresh_online_models():
             "admin-models-refresh",
         )
     except Exception as exc:
-        logger.error(f"❌ 在线模型刷新失败: {exc}")
+        logger.exception("❌ 在线模型刷新失败")
         return _build_alert(
             f"刷新失败: {exc}",
             title="错误！",

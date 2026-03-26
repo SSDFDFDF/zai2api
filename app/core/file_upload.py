@@ -155,5 +155,5 @@ async def upload_file(
         }
 
     except Exception as e:
-        logger.error(f"❌ 文件上传异常: {e}")
+        logger.exception("❌ 文件上传异常")
         return None

@@ -8,14 +8,12 @@ model capabilities, and model feature resolution logic.  Supports both
 hardcoded fallback data and dynamic parsing from online model metadata.
 """
 
-import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from app.core.config import settings
 from app.models.schemas import OpenAIRequest
-
-logger = logging.getLogger(__name__)
+from app.utils.logger import logger
 
 
 @dataclass

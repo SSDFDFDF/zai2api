@@ -60,7 +60,7 @@ async def list_models():
         )
         return JSONResponse(content=response.model_dump(exclude_none=True))
     except Exception as exc:
-        logger.error("获取模型列表失败: %s", exc)
+        logger.exception("获取模型列表失败")
         raise HTTPException(status_code=500, detail=f"Failed to list models: {exc}")
 
 
@@ -178,7 +178,7 @@ async def chat_completions(
         raise
     except Exception as exc:
         error_message = get_error_message(exc)
-        logger.error("%s 请求处理失败: %s", source_prefix, error_message)
+        logger.exception("%s 请求处理失败: %s", source_prefix, error_message)
         await write_request_log(
             provider="zai",
             model=body.model,

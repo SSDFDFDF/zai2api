@@ -119,7 +119,7 @@ class AsyncTokenStatsWriter:
                         await asyncio.shield(self._write_batch(batch))
                 raise
             except Exception as exc:
-                logger.error("AsyncTokenStatsWriter flush error: %s", exc)
+                logger.exception("AsyncTokenStatsWriter flush error")
                 await asyncio.sleep(1)
 
     async def _collect_batch(self, *, wait_for_first: bool) -> List[TokenStatsUpdate]:

@@ -423,4 +423,4 @@ class SessionManager:
             except asyncio.CancelledError:
                 break
             except Exception as exc:
-                logger.warning(f"会话清理异常: {exc}")
+                logger.warning("会话清理异常", exc_info=True)

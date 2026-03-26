@@ -172,6 +172,15 @@
                         请求日志
                     </a>
 
+                    <a href="{{ root_path }}/admin/runtime-logs"
+                        class="{% if '/runtime-logs' in current_path %}bg-slate-100 text-indigo-700{% else %}text-gray-700 hover:bg-gray-100{% endif %} group flex items-center px-3 py-2 text-sm font-medium rounded-md">
+                        <svg class="mr-3 h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M3 7h18M3 12h18M3 17h18" />
+                        </svg>
+                        运行日志
+                    </a>
+
                     <!-- 配置管理 -->
                     <a href="{{ root_path }}/admin/config"
                         class="{% if '/config' in current_path %}bg-slate-100 text-indigo-700{% else %}text-gray-700 hover:bg-gray-100{% endif %} group flex items-center px-3 py-2 text-sm font-medium rounded-md">
@@ -194,18 +203,6 @@
                         Token 管理
                     </a>
 
-                    <!-- 分隔线 -->
-                    <div class="border-t border-gray-200 my-4"></div>
-
-                    <!-- API 文档 -->
-                    <a href="{{ root_path }}/docs" target="_blank"
-                        class="text-gray-700 hover:bg-gray-100 group flex items-center px-3 py-2 text-sm font-medium rounded-md">
-                        <svg class="mr-3 h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                        </svg>
-                        API 文档
-                    </a>
                 </nav>
             </aside>
 

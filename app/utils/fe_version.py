@@ -113,7 +113,10 @@ async def get_latest_fe_version(force_refresh: bool = False) -> str:
                 logger.error("[Z.AI] Unable to locate X-FE-Version in landing page")
                 raise Exception("Unable to locate X-FE-Version in landing page")
         except Exception as exc:
-            logger.error("[Z.AI] Failed to fetch X-FE-Version from %s: %s", FE_VERSION_SOURCE_URL, exc)
+            logger.exception(
+                "[Z.AI] Failed to fetch X-FE-Version from %s",
+                FE_VERSION_SOURCE_URL,
+            )
             if _cached_version:
                 return _cached_version
             raise Exception(f"Failed to fetch X-FE-Version: {exc}")

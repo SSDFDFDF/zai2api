@@ -78,6 +78,11 @@ class Settings(BaseSettings):
     DEBUG_LOGGING: bool = os.getenv("DEBUG_LOGGING", "false").lower() == "true"
     SERVICE_NAME: str = os.getenv("SERVICE_NAME", "api-proxy-server")
     ROOT_PATH: str = os.getenv("ROOT_PATH", "")  # For Nginx reverse proxy path prefix, e.g., "/api" or "/path-prefix"
+    LOG_FILE_PATH: str = os.getenv("LOG_FILE_PATH", "logs/app.log")
+    LOG_FILE_MAX_BYTES: int = int(
+        os.getenv("LOG_FILE_MAX_BYTES", str(5 * 1024 * 1024))
+    )
+    LOG_FILE_BACKUP_COUNT: int = int(os.getenv("LOG_FILE_BACKUP_COUNT", "3"))
 
     ANONYMOUS_MODE: bool = os.getenv("ANONYMOUS_MODE", "true").lower() == "true"
     GUEST_POOL_SIZE: int = int(os.getenv("GUEST_POOL_SIZE", "3"))

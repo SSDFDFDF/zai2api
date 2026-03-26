@@ -45,8 +45,9 @@ uv run python main.py
 首次启动会自动初始化数据库。默认地址：
 
 - **API 根路径**：`http://127.0.0.1:8080`
-- **Swagger 文档**：`http://127.0.0.1:8080/docs`
 - **管理后台**：`http://127.0.0.1:8080/admin` (默认密码: `admin123`)
+
+出于安全考虑，FastAPI 内置文档与 schema 端点默认关闭，不对外暴露 `/docs`、`/redoc`、`/openapi.json`。
 
 ### Docker 部署
 

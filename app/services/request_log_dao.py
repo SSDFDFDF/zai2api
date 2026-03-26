@@ -271,7 +271,7 @@ class RequestLogDAO:
                 "avg_first_token_time": float(row["avg_first_token_time"] or 0.0),
             }
         except Exception as e:
-            logger.error(f"❌ 获取请求统计失败: {e}")
+            logger.exception("❌ 获取请求统计失败")
             return {
                 "total_requests": 0, "successful_requests": 0, "failed_requests": 0,
                 "input_tokens": 0, "output_tokens": 0, "total_tokens": 0,

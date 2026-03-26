@@ -166,6 +166,21 @@ async def request_logs_page(request: Request):
         raise
 
 
+@router.get("/runtime-logs", response_class=HTMLResponse, dependencies=[Depends(require_auth)])
+async def runtime_logs_page(request: Request):
+    """运行日志页面"""
+    try:
+        return templates.TemplateResponse(
+            request,
+            "runtime_logs.html",
+            _base_context(request),
+            headers=_page_headers(),
+        )
+    except Exception:
+        logger.exception("渲染管理后台运行日志页失败")
+        raise
+
+
 @router.get(
     "/tokens",
     response_class=HTMLResponse,

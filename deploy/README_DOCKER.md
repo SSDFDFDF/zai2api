@@ -248,8 +248,9 @@ docker exec -it z-ai-api-server bash
 | API 根路径 | `http://localhost:8080` | OpenAI 兼容 API |
 | 模型列表 | `http://localhost:8080/v1/models` | 获取可用模型 |
 | 管理后台 | `http://localhost:8080/admin` | Web 管理界面 |
-| API 文档 | `http://localhost:8080/docs` | OpenAPI/Swagger 文档 |
 | 健康检查 | `http://localhost:8080/v1/models` | 服务健康状态 |
+
+说明：为减少默认暴露面，FastAPI 内置的 `/docs`、`/redoc`、`/openapi.json` 文档端点默认关闭。
 
 ## 高级配置
 

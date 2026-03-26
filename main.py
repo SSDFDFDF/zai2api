@@ -14,11 +14,11 @@ from app.admin import api as admin_api
 from app.admin import routes as admin_routes
 from app.core import openai
 from app.core.config import settings
-from app.utils.logger import setup_logger
+from app.utils.logger import DEFAULT_LOG_DIR, setup_logger
 from app.utils.reload_config import get_uvicorn_reload_config
 
 # Setup logger
-logger = setup_logger(log_dir="logs", debug_mode=settings.DEBUG_LOGGING)
+logger = setup_logger(log_dir=DEFAULT_LOG_DIR, debug_mode=settings.DEBUG_LOGGING)
 
 
 async def warmup_upstream_client():
@@ -35,10 +35,15 @@ async def warmup_upstream_client():
             try:
                 await client.get_online_models()
             except Exception as exc:
-                logger.warning(f"首次拉取在线模型失败，使用硬编码默认值: {exc}")
-        logger.info(f"✅ 上游适配器已就绪，支持 {len(client.get_supported_models())} 个模型")
+                logger.warning(
+                    "首次拉取在线模型失败，使用硬编码默认值",
+                    exc_info=True,
+                )
+        logger.info(
+            f"✅ 上游适配器已就绪，支持 {len(client.get_supported_models())} 个模型"
+        )
     except Exception as exc:
-        logger.warning(f"⚠️ 上游适配器预热失败: {exc}")
+        logger.warning("⚠️ 上游适配器预热失败", exc_info=True)
 
 
 @asynccontextmanager
@@ -56,6 +61,7 @@ async def lifespan(app: FastAPI):
 
     # 加载数据库配置覆盖
     await apply_db_overrides(settings)
+    setup_logger(log_dir=DEFAULT_LOG_DIR, debug_mode=settings.DEBUG_LOGGING)
 
     if settings.TOKEN_AUTO_IMPORT_ENABLED and settings.TOKEN_AUTO_IMPORT_SOURCE_DIR.strip():
         try:
@@ -65,7 +71,7 @@ async def lifespan(app: FastAPI):
             )
             logger.info("✅ 启动阶段已完成一次目录自动导入")
         except Exception as exc:
-            logger.warning(f"⚠️ 启动阶段目录自动导入失败: {exc}")
+            logger.warning("⚠️ 启动阶段目录自动导入失败", exc_info=True)
 
     # 从数据库初始化认证 token 池
     from app.utils.token_pool import initialize_token_pool_from_db
@@ -116,7 +122,7 @@ async def lifespan(app: FastAPI):
                         await client.get_online_models()
                         logger.info("在线模型自动刷新完成")
                 except Exception as exc:
-                    logger.warning(f"在线模型自动刷新失败: {exc}")
+                    logger.warning("在线模型自动刷新失败", exc_info=True)
 
         _model_refresh_task = asyncio.create_task(_model_auto_refresh_loop())
         logger.info(f"在线模型自动刷新已启用，间隔 {settings.MODEL_AUTO_REFRESH_HOURS} 小时")
@@ -159,12 +165,19 @@ async def lifespan(app: FastAPI):
         await close_db()
         logger.info("✅ 数据库连接已关闭")
     except Exception as e:
-        logger.error(f"❌ 关闭数据库连接时出错: {e}")
+        logger.exception("❌ 关闭数据库连接时出错")
 
 
 # Create FastAPI app with lifespan
 # root_path is used for reverse proxy path prefix (e.g., /api or /path-prefix)
-app = FastAPI(lifespan=lifespan, root_path=settings.ROOT_PATH)
+# Disable FastAPI's built-in schema and documentation endpoints by default.
+app = FastAPI(
+    lifespan=lifespan,
+    root_path=settings.ROOT_PATH,
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
 
 cors_origins_str = os.getenv("CORS_ORIGINS", "")
 cors_origins = [o.strip() for o in cors_origins_str.split(",") if o.strip()]
@@ -219,7 +232,7 @@ def run_server():
     except KeyboardInterrupt:
         logger.info("🛑 received interrupt signal, shutting down...")
     except Exception as e:
-        logger.error(f"❌ service startup failed: {e}")
+        logger.exception("❌ service startup failed")
         sys.exit(1)
 
 

@@ -44,7 +44,11 @@ async def delete_chats_for_token(
         logger.warning(f"⚠️ 清理会话失败 (Token: {token[:15]}...): HTTP {response.status_code} {response.text}")
         return False
     except Exception as e:
-        logger.warning(f"⚠️ 清理会话时发生错误 (Token: {token[:15]}...): {e}")
+        logger.warning(
+            "⚠️ 清理会话时发生错误 (Token: %s...)",
+            token[:15],
+            exc_info=True,
+        )
         return False
     finally:
         if owns_clients:

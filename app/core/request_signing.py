@@ -450,7 +450,7 @@ async def sign_request(
             signature[:16], user_id, request_id,
         )
     except Exception as e:
-        logger.error(f"[上游] 签名生成失败: {e}")
+        logger.exception("[上游] 签名生成失败")
         raise RuntimeError(f"签名生成失败: {e}") from e
 
     # 构建请求头（保留所有字段）

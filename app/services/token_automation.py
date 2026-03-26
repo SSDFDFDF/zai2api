@@ -195,7 +195,7 @@ class TokenAutomationScheduler:
             except (FileNotFoundError, NotADirectoryError) as exc:
                 self._log_import_warning_once(str(exc))
             except Exception as exc:
-                logger.exception(f"❌ 自动导入 Token 失败: {exc}")
+                logger.exception("❌ 自动导入 Token 失败")
 
             await self._wait_or_stop(wait_seconds)
 
@@ -234,7 +234,7 @@ class TokenAutomationScheduler:
             except RuntimeError as exc:
                 logger.debug("跳过本轮自动维护: %s", exc)
             except Exception as exc:
-                logger.exception(f"❌ Token 自动维护失败: {exc}")
+                logger.exception("❌ Token 自动维护失败")
 
             await self._wait_or_stop(wait_seconds)
 
@@ -258,7 +258,7 @@ class TokenAutomationScheduler:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                logger.exception(f"❌ 定期会话清理失败: {exc}")
+                logger.exception("❌ 定期会话清理失败")
                 wait_seconds = 3600  # 执行出错的话，过 1 小时再重试
             
             await self._wait_or_stop(wait_seconds)
@@ -290,7 +290,7 @@ class TokenAutomationScheduler:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                logger.exception(f"❌ 定期请求日志清理失败: {exc}")
+                logger.exception("❌ 定期请求日志清理失败")
                 wait_seconds = 3600  # 执行出错的话，过 1 小时再重试
 
             await self._wait_or_stop(wait_seconds)

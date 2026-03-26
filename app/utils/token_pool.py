@@ -339,7 +339,7 @@ class TokenPool:
         try:
             await dao.record_success(token_id)
         except Exception as e:
-            logger.error(f"❌ 同步 Token 成功统计失败: {e}")
+            logger.exception("❌ 同步 Token 成功统计失败")
             return
 
         await self.mark_stats_synced(token=token, successful_requests=1)
@@ -369,7 +369,7 @@ class TokenPool:
         try:
             await dao.record_failure(token_id)
         except Exception as e:
-            logger.error(f"❌ 同步 Token 失败统计失败: {e}")
+            logger.exception("❌ 同步 Token 失败统计失败")
             return
 
         await self.mark_stats_synced(token=token, failed_requests=1)

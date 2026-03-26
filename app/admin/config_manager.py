@@ -101,7 +101,7 @@ CONFIG_SECTIONS: tuple[ConfigSectionSpec, ...] = (
             ConfigFieldSpec(
                 key="SESSION_SYSTEM_INJECT",
                 label="System 注入模式",
-                description="仅控制普通 system 提示词是否并入用户消息；工具协议提示的位置由工具提示注入位置单独控制。",
+                description="控制 system 提示词是否并入用户消息。",
                 value_type="bool",
                 default_value=False,
             ),
@@ -157,9 +157,41 @@ CONFIG_SECTIONS: tuple[ConfigSectionSpec, ...] = (
             ConfigFieldSpec(
                 key="DEBUG_LOGGING",
                 label="启用调试日志",
-                description="开启后会输出更详细的调试信息。",
+                description="开启后控制台和日志文件统一输出 DEBUG，并使用详细格式。",
                 value_type="bool",
                 default_value=False,
+                db_persist=False,
+            ),
+            ConfigFieldSpec(
+                key="LOG_FILE_PATH",
+                label="日志文件路径",
+                description="相对路径默认相对于项目根目录解析。",
+                value_type="str",
+                default_value="logs/app.log",
+                placeholder="logs/app.log",
+                wide=True,
+                db_persist=False,
+            ),
+            ConfigFieldSpec(
+                key="LOG_FILE_MAX_BYTES",
+                label="单个日志文件上限 (Bytes)",
+                description="超过该大小后自动轮转到备份文件。",
+                value_type="int",
+                default_value=5242880,
+                input_type="number",
+                min_value=1024,
+                placeholder="5242880",
+                db_persist=False,
+            ),
+            ConfigFieldSpec(
+                key="LOG_FILE_BACKUP_COUNT",
+                label="日志备份数量",
+                description="保留的轮转备份文件数量。",
+                value_type="int",
+                default_value=3,
+                input_type="number",
+                min_value=1,
+                placeholder="3",
                 db_persist=False,
             ),
             ConfigFieldSpec(
@@ -667,7 +699,7 @@ async def load_db_overrides() -> dict[str, Any]:
         dao = get_config_dao()
         raw_items = await dao.get_all()
     except Exception as exc:
-        logger.debug("读取数据库配置失败，回退到环境变量: %s", exc)
+        logger.debug("读取数据库配置失败，回退到环境变量", exc_info=True)
         return {}
 
     overrides: dict[str, Any] = {}
@@ -898,9 +930,7 @@ async def save_form_config(
             await dao.set_many(db_updates)
             logger.debug("已保存 %s 项配置到数据库", len(db_updates))
         except Exception as exc:
-            logger.warning(
-                f"⚠️ 数据库保存失败，回退到环境变量: {exc}"
-            )
+            logger.warning("⚠️ 数据库保存失败，回退到环境变量", exc_info=True)
             env_updates.update(updates)  # fallback: 全部写入 .env
             db_updates.clear()
 

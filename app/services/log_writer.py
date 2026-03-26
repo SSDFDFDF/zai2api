@@ -76,7 +76,7 @@ class AsyncLogWriter:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                logger.error("AsyncLogWriter flush error: %s", exc)
+                logger.exception("AsyncLogWriter flush error")
                 await asyncio.sleep(1)
 
     async def _collect_batch(self) -> List[RequestLog]:
@@ -119,7 +119,7 @@ class AsyncLogWriter:
                 session.add_all(batch)
                 await session.commit()
         except Exception as exc:
-            logger.error("Batch log write failed (%d entries): %s", len(batch), exc)
+            logger.exception("Batch log write failed (%d entries)", len(batch))
 
 
 # ------------------------------------------------------------------

@@ -324,7 +324,7 @@ class ResponseHandler:
                 ctx.finished = True
 
         except Exception as e:
-            logger.error("stream error: %s", e)
+            logger.exception("stream error")
             if not ctx.finished:
                 yield format_sse_chunk(
                     create_openai_chunk(ctx.ensure_stream_id(), model, {}, "stop", created=ctx.created_at)
@@ -400,7 +400,7 @@ class ResponseHandler:
                     usage = event.usage
 
         except Exception as e:
-            logger.error("non-stream error: %s", e)
+            logger.exception("non-stream error")
             return handle_error(e, "non-stream aggregation")
 
         final = "".join(content_parts).strip()

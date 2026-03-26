@@ -1,0 +1,22 @@
+<div class="flex h-full flex-col min-h-0 space-y-4">
+    <div class="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-600">
+        <div class="truncate">
+            <span class="font-medium text-slate-800">文件:</span>
+            <span class="font-mono">{{ log_path }}</span>
+        </div>
+        <div class="flex items-center gap-4">
+            <span>大小 {{ file_size }} bytes</span>
+            <span>刷新于 {{ updated_at }}</span>
+        </div>
+    </div>
+
+    {% if truncated %}
+    <div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+        仅显示文件尾部最近 {{ max_bytes }} bytes，以降低内存与渲染开销。
+    </div>
+    {% endif %}
+
+    <div class="flex-1 min-h-0 overflow-hidden rounded-2xl border border-slate-200 bg-slate-950">
+        <pre class="h-full overflow-auto p-4 text-xs leading-5 text-slate-100 whitespace-pre-wrap break-words"><code>{% if content %}{{ content }}{% else %}日志文件为空或尚未创建。{% endif %}</code></pre>
+    </div>
+</div>

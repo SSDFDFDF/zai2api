@@ -127,7 +127,7 @@ async def init_db():
             await conn.run_sync(run_upgrade)
             logger.debug("迁移成功")
         except Exception as e:
-            logger.error("自动迁移过程中出错: %s", e)
+            logger.exception("自动迁移过程中出错")
 
 async def close_db():
     """关闭数据库连接"""

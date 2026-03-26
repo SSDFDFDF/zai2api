@@ -228,7 +228,7 @@ async def write_request_log(
             error_message=error_message,
         )
     except Exception as exc:
-        logger.error("Failed to write request log: %s", exc)
+        logger.exception("Failed to write request log")
 
 
 def _openai_payload_has_output(payload: Dict[str, Any]) -> bool:
