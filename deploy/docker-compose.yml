@@ -1,0 +1,35 @@
+services:
+  api-server:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: z-ai-api-server
+    ports:
+      - "8080:8080"
+    volumes:
+      # 数据库持久化存储
+      - ./data:/app/data
+      # 日志持久化存储(可选)
+      - ./logs:/app/logs
+    environment:
+      - ADMIN_PASSWORD=admin123
+      # Auth Configuration
+      - AUTH_TOKEN=sk-your-api-key
+      # 是否跳过api key验证
+      - SKIP_AUTH_TOKEN=false
+      # 调试日志
+      - DEBUG_LOGGING=true
+      # 匿名模式
+      - ANONYMOUS_MODE=true
+      # 工具调用策略: xmlfc | native | glmnative | disabled
+      - TOOL_STRATEGY=xmlfc
+      # 工具调用扫描限制(字符数)
+      - SCAN_LIMIT=200000
+      # 数据库路径 - 使用持久化卷
+      - DB_PATH=/app/data/tokens.db
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/v1/models"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

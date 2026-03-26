@@ -1,0 +1,157 @@
+# Nginx reverse proxy configuration example for Z.AI2API
+# This example shows how to deploy the service behind Nginx with a custom path prefix
+
+# Example 1: Deploy at http://your-domain.com/ai2api
+server {
+    listen 80;
+    server_name your-domain.com;
+
+    # Forward requests with /ai2api prefix to the backend service
+    location /ai2api {
+        # Remove trailing slash redirect (optional, but recommended)
+        rewrite ^(/ai2api)$ $1/ permanent;
+
+        # Proxy to the backend service
+        proxy_pass http://127.0.0.1:8080;
+
+        # Pass original host and IP information
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # IMPORTANT: Tell the backend about the path prefix
+        # This ensures all generated URLs include the prefix
+        proxy_set_header X-Forwarded-Prefix /ai2api;
+
+        # WebSocket and SSE support (for streaming responses)
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        # Disable buffering for streaming responses
+        proxy_buffering off;
+        proxy_cache off;
+
+        # Timeout settings (adjust as needed)
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 300s;
+        proxy_read_timeout 300s;
+    }
+}
+
+# Example 2: Deploy at http://your-domain.com/api/chat
+server {
+    listen 80;
+    server_name example.com;
+
+    location /api/chat {
+        # Proxy configuration
+        proxy_pass http://127.0.0.1:8080;
+
+        # Headers
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Prefix /api/chat;
+
+        # SSE/WebSocket support
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_buffering off;
+        proxy_cache off;
+    }
+}
+
+# Example 3: Deploy with SSL (HTTPS)
+server {
+    listen 443 ssl http2;
+    server_name secure.example.com;
+
+    # SSL configuration
+    ssl_certificate /path/to/cert.pem;
+    ssl_certificate_key /path/to/key.pem;
+
+    location /ai2api {
+        proxy_pass http://127.0.0.1:8080;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Prefix /ai2api;
+
+        # SSE/WebSocket support
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_buffering off;
+        proxy_cache off;
+
+        # Security headers (optional)
+        add_header X-Content-Type-Options nosniff;
+        add_header X-Frame-Options DENY;
+        add_header X-XSS-Protection "1; mode=block";
+    }
+}
+
+# Example 4: Load balancing with multiple backend instances
+upstream ai2api_backend {
+    # Round-robin by default
+    server 127.0.0.1:8080;
+    server 127.0.0.1:8081;
+    server 127.0.0.1:8082;
+
+    # Or use least connections
+    # least_conn;
+
+    # Or use IP hash for session persistence
+    # ip_hash;
+}
+
+server {
+    listen 80;
+    server_name loadbalanced.example.com;
+
+    location /ai2api {
+        proxy_pass http://ai2api_backend;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Prefix /ai2api;
+
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_buffering off;
+        proxy_cache off;
+    }
+}
+
+# Important Notes:
+#
+# 1. Set ROOT_PATH in your .env file to match the Nginx location path:
+#    ROOT_PATH=/ai2api
+#
+# 2. Restart both Nginx and the application after configuration changes:
+#    sudo systemctl reload nginx
+#    docker-compose restart (or restart your application)
+#
+# 3. Access URLs will include the prefix:
+#    - Admin panel: http://your-domain.com/ai2api/admin/login
+#    - API endpoint: http://your-domain.com/ai2api/v1/chat/completions
+#    - Health check: http://your-domain.com/ai2api/v1/models
+#
+# 4. For Docker deployments, make sure to:
+#    - Add ROOT_PATH to docker-compose.yml environment variables
+#    - Expose the container port (8080 by default)
+#
+# 5. Common issues:
+#    - 404 errors: Check that ROOT_PATH matches the Nginx location path exactly
+#    - CORS errors: Verify proxy headers are set correctly
+#    - Streaming not working: Ensure proxy_buffering is off
+#    - Admin panel CSS/JS not loading: Confirm static files are served with the prefix

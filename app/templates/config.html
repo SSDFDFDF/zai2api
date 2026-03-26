@@ -1,0 +1,312 @@
+{% extends "base.html" %}
+
+{% block title %}设置{% endblock %}
+
+{% block extra_head %}
+<!-- 极简设计风格 -->
+<style>
+    /* 自定义单选框/复选框颜色 */
+    .form-checkbox:checked {
+        background-color: #4f46e5;
+        border-color: #4f46e5;
+    }
+</style>
+{% endblock %}
+
+{% macro render_field(field) -%}
+<div class="mb-5 {{ 'col-span-1 md:col-span-2' if field.wide else 'col-span-1' }}">
+    {% if field.value_type == 'bool' %}
+    <label
+        class="relative flex items-center justify-between group p-3 bg-white border border-gray-200 rounded-xl hover:border-indigo-500 cursor-pointer shadow-sm transition-all">
+        <div>
+            <span class="block text-sm font-semibold text-gray-800">{{ field.label }}</span>
+            <span class="block mt-1 text-xs text-gray-500 max-w-[80%]">{{ field.description }}</span>
+            {% if field.restart_required %}
+            <span
+                class="mt-2 inline-block px-2 py-0.5 text-[10px] font-medium text-amber-700 bg-amber-100 rounded">需重启生效</span>
+            {% endif %}
+        </div>
+        <div>
+            <!-- Toggle Switch UI -->
+            <input type="checkbox" name="{{ field.key }}" class="peer sr-only" {% if field.value==True or
+                field.value=='true' or field.value=='1' %}checked{% endif %}>
+            <div
+                class="relative w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-slate-800">
+            </div>
+        </div>
+    </label>
+    {% else %}
+    <label class="block">
+        <span class="text-sm font-semibold text-gray-800">{{ field.label }}</span>
+        {% if field.restart_required or field.sensitive %}
+        <div class="inline-flex ml-2 gap-1 mb-1">
+            {% if field.restart_required %}
+            <span class="px-2 py-0.5 text-[10px] font-medium text-amber-700 bg-amber-100 rounded">需重启</span>
+            {% endif %}
+            {% if field.sensitive %}
+            <span class="px-2 py-0.5 text-[10px] font-medium text-red-700 bg-red-100 rounded">敏感信息</span>
+            {% endif %}
+        </div>
+        {% endif %}
+        <span class="block text-xs text-gray-500 mb-2">{{ field.description }}</span>
+
+        {% if field.input_type == 'select' %}
+        <select name="{{ field.key }}" id="{{ field.key }}"
+            class="block w-full px-4 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition-all shadow-sm">
+            {% for opt in field.options %}
+            <option value="{{ opt }}" {% if field.value == opt %}selected{% endif %}>{{ opt }}</option>
+            {% endfor %}
+        </select>
+        {% elif field.sensitive %}
+        <div class="relative mt-1" x-data="{ show: false }">
+            <input id="{{ field.key }}" name="{{ field.key }}"
+                :type="show ? 'text' : 'password'"
+                value="{{ field.value }}" placeholder="{{ field.placeholder }}" {% if field.required %}required{% endif
+                %} {% if field.min_value is not none %}min="{{ field.min_value }}" {% endif %} {% if field.max_value is
+                not none %}max="{{ field.max_value }}" {% endif %}
+                class="block w-full px-4 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition-all shadow-sm">
+            <button type="button" @click="show = !show"
+                class="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-indigo-600 transition">
+                <span x-text="show ? '隐藏' : '显示'" class="text-xs font-medium"></span>
+            </button>
+        </div>
+        {% else %}
+        <div class="relative mt-1">
+            <input id="{{ field.key }}" name="{{ field.key }}"
+                type="{{ field.input_type }}"
+                value="{{ field.value }}" placeholder="{{ field.placeholder }}" {% if field.required %}required{% endif
+                %} {% if field.min_value is not none %}min="{{ field.min_value }}" {% endif %} {% if field.max_value is
+                not none %}max="{{ field.max_value }}" {% endif %}
+                class="block w-full px-4 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition-all shadow-sm">
+        </div>
+        {% endif %}
+    </label>
+    {% endif %}
+</div>
+{%- endmacro %}
+
+{% block content %}
+<div class="w-full space-y-6">
+    <!-- 页面标题 -->
+    <div class="flex items-center justify-between">
+        <div>
+            <h2 class="text-3xl font-bold text-gray-900">配置中心</h2>
+            <p class="mt-1 text-sm text-gray-600">
+                调整应用程序行为、认证密钥和上游模型映射。配置修改即刻保存并热更新；底层环境字段自动存入 <code
+                    class="bg-gray-100 px-1 rounded text-gray-800">.env</code> 中。
+            </p>
+        </div>
+        <div class="flex flex-wrap gap-3">
+            <button type="button" hx-post="/admin/api/config/save" hx-include="#main-config-form"
+                hx-target="#config-feedback" hx-swap="innerHTML"
+                class="px-4 py-2 bg-slate-800 text-white rounded-md text-sm font-medium hover:bg-slate-700 flex items-center">
+                <svg class="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+                </svg>
+                保存我的配置
+            </button>
+        </div>
+    </div>
+
+    <!-- Alert placeholder -->
+    <div id="config-feedback"></div>
+
+    <!-- Main Config Form -->
+    <form id="main-config-form" hx-post="/admin/api/config/save" hx-target="#config-feedback" hx-swap="innerHTML"
+        class="space-y-8" x-data="{ activeTab: '{{ sections[0].id }}' }">
+
+        <!-- Mobile & Desktop Tab Navigation -->
+        <div class="sticky top-0 z-20 bg-gray-50/90 backdrop-blur-md pt-2 pb-4 border-b border-gray-200">
+            <div class="flex space-x-2 overflow-x-auto scrollbar-hide">
+                {% for section in sections %}
+                <button type="button" @click="activeTab = '{{ section.id }}'"
+                    :class="activeTab === '{{ section.id }}' ? 'bg-slate-800 text-white shadow-md' : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200'"
+                    class="group px-4 py-2 rounded-full text-sm font-semibold whitespace-nowrap transition-all duration-200 flex items-center gap-2">
+                    {% if section.icon %}
+                    <svg class="h-4 w-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="{{ section.icon }}" />
+                    </svg>
+                    {% endif %}
+                    <span>{{ section.title }}</span>
+                </button>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- Sections content -->
+        <div class="bg-transparent">
+            {% for section in sections %}
+            <div x-show="activeTab === '{{ section.id }}'" x-transition:enter="transition-opacity ease-out duration-300"
+                x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
+                class="bg-white rounded-3xl p-6 md:p-8 shadow-sm border border-gray-100">
+                <div class="mb-8 flex items-start gap-4">
+                    {% if section.icon %}
+                    <div
+                        class="p-4 bg-slate-50 text-indigo-600 rounded-2xl group-hover:bg-slate-100 transition-colors duration-300 shadow-sm shadow-indigo-100">
+                        <svg class="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5"
+                                d="{{ section.icon }}" />
+                        </svg>
+                    </div>
+                    {% endif %}
+                    <div class="space-y-1 py-1">
+                        <h2 class="text-2xl font-extrabold text-gray-900 tracking-tight">{{ section.title }}</h2>
+                        <p class="text-sm text-gray-500 leading-relaxed">{{ section.description }}</p>
+                    </div>
+                </div>
+
+                {% if section.id == 'models' %}
+                <!-- 在线模型状态 + 刷新 -->
+                <div class="mb-6 rounded-2xl border border-indigo-100 bg-indigo-50/50 p-5" x-data="{ isRefreshing: false }">
+                    <div class="flex items-center justify-between gap-4">
+                        <div class="flex items-center gap-3">
+                            <div class="flex-shrink-0 rounded-xl bg-indigo-100 p-2.5 text-indigo-600">
+                                <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                </svg>
+                            </div>
+                            <div>
+                                <p class="text-sm font-semibold text-gray-800">
+                                    在线模型
+                                    <span class="ml-2 inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium {% if model_parsed %}bg-emerald-100 text-emerald-700{% else %}bg-amber-100 text-amber-700{% endif %}">
+                                        {{ model_count }} 个变体 · {{ '动态解析' if model_parsed else '硬编码回退' }}
+                                    </span>
+                                </p>
+                                <p class="mt-0.5 text-xs text-gray-500">从上游拉取模型列表，自动生成 Thinking / Search / Agent / advanced-search 变体。</p>
+                            </div>
+                        </div>
+                        <button
+                            hx-post="/admin/api/models/refresh"
+                            hx-target="#config-feedback"
+                            hx-swap="innerHTML"
+                            @htmx:before-request="isRefreshing = true"
+                            @htmx:after-request="isRefreshing = false; if ($event.detail.successful) { setTimeout(() => location.reload(), 800); }"
+                            :disabled="isRefreshing"
+                            class="flex-shrink-0 inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed">
+                            <svg :class="isRefreshing && 'animate-spin'" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            </svg>
+                            <span x-text="isRefreshing ? '刷新中...' : '刷新模型'"></span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 模型列表（可收起展开） -->
+                {% if model_list %}
+                <div class="mb-6" x-data="{ open: false }">
+                    <button type="button" @click="open = !open"
+                        class="w-full flex items-center justify-between rounded-2xl border border-gray-200 bg-gray-50/80 px-5 py-3.5 text-left transition-colors hover:bg-gray-100">
+                        <div class="flex items-center gap-2.5">
+                            <svg class="h-5 w-5 flex-shrink-0 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+                            </svg>
+                            <span class="text-sm font-semibold text-gray-800 whitespace-nowrap">模型列表</span>
+                            <span class="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-600">{{ model_list | length }}</span>
+                        </div>
+                        <svg :class="open && 'rotate-180'" class="h-4 w-4 text-gray-400 transition-transform duration-200" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                        </svg>
+                    </button>
+                    <div x-show="open" x-collapse x-cloak
+                        class="mt-2 overflow-hidden rounded-2xl border border-gray-200">
+                        <table class="min-w-full text-sm">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-4 py-3 text-left font-semibold text-gray-700">模型名称</th>
+                                    <th class="px-4 py-3 text-left font-semibold text-gray-700">上游 ID</th>
+                                    <th class="px-4 py-3 text-center font-semibold text-gray-700">能力</th>
+                                    <th class="px-4 py-3 text-left font-semibold text-gray-700">MCP / 场景</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-100">
+                                {% for m in model_list %}
+                                <tr class="hover:bg-gray-50/60 transition-colors">
+                                    <td class="px-4 py-2.5 font-medium text-gray-900 whitespace-nowrap">{{ m.name }}</td>
+                                    <td class="px-4 py-2.5 font-mono text-xs text-gray-500 whitespace-nowrap">{{ m.upstream_id }}</td>
+                                    <td class="px-4 py-2.5 text-center">
+                                        <div class="flex flex-wrap justify-center gap-1">
+                                            {% if m.tool_use %}<span class="inline-block rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700">FC</span>{% endif %}
+                                            {% if m.vision %}<span class="inline-block rounded bg-purple-100 px-1.5 py-0.5 text-[10px] font-semibold text-purple-700">Vision</span>{% endif %}
+                                            {% if m.thinking %}<span class="inline-block rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">Think</span>{% endif %}
+                                            {% if m.web_search %}<span class="inline-block rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">Search</span>{% endif %}
+                                            {% if m.agent %}<span class="inline-block rounded bg-rose-100 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700">Agent</span>{% endif %}
+                                        </div>
+                                    </td>
+                                    <td class="px-4 py-2.5 text-xs text-gray-500">
+                                        {% if m.mcp_servers %}
+                                        <span class="text-indigo-600">{{ m.mcp_servers | join(', ') }}</span>
+                                        {% endif %}
+                                        {% if m.scene_defaults %}
+                                        {% for k, v in m.scene_defaults.items() %}
+                                        <span class="ml-1 text-gray-400">{{ k }}={{ v }}</span>
+                                        {% endfor %}
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                {% else %}
+                <div class="mb-6 rounded-2xl border border-amber-100 bg-amber-50 p-4 text-sm text-amber-700">
+                    尚无在线模型数据，请点击上方"刷新模型"从上游拉取。
+                </div>
+                {% endif %}
+                {% endif %}
+
+                <!-- Fields Grid -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2">
+                    {% for field in section.fields %}
+                    {{ render_field(field) }}
+                    {% endfor %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </form>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    document.body.addEventListener('admin-config-refresh', () => {
+        setTimeout(() => {
+            window.location.reload();
+        }, 1000);
+    });
+
+    document.body.addEventListener('htmx:afterSwap', function (evt) {
+        if (evt.detail.target.id === 'config-feedback') {
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+    });
+
+    // Handle HTMX Response Errors (4xx, 5xx) to show message
+    document.body.addEventListener('htmx:responseError', function (evt) {
+        const feedbackDiv = document.getElementById('config-feedback');
+        // By default, htmx ignores body on 400. We swap it manually if error is returned.
+        if (evt.detail.xhr.status >= 400) {
+            feedbackDiv.innerHTML = evt.detail.xhr.responseText || `<div class="p-4 bg-red-50 text-red-900 border border-red-200 rounded-2xl shadow-sm my-4"><strong>发生严重错误。</strong> 请检查输入格式是否正确。</div>`;
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+    });
+</script>
+<style>
+    /* Hide scrollbar for tab navigation */
+    .scrollbar-hide::-webkit-scrollbar {
+        display: none;
+    }
+
+    .scrollbar-hide {
+        -ms-overflow-style: none;
+        /* IE and Edge */
+        scrollbar-width: none;
+        /* Firefox */
+    }
+</style>
+{% endblock %}

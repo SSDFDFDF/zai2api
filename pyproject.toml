@@ -1,0 +1,76 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "z-ai2api-python"
+version = "0.1.0"
+description = "一个为 Z.ai 提供 OpenAI 兼容接口的 Python 代理服务"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Contributors" }]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "fastapi==0.135.1",
+    "uvicorn[standard]>=0.34.0",
+    "httpx[http2]==0.28.1",
+    "pydantic==2.12.5",
+    "pydantic-settings==2.13.1",
+    "typing-inspection==0.4.2",
+    "fake-useragent==2.2.0",
+    "psutil>=7.0.0",
+    "json-repair==0.44.1",
+    "PyJWT>=2.8.0",
+    "cryptography>=42.0.0",
+    "jinja2==3.1.4",
+    "aiosqlite==0.20.0",
+    "python-multipart==0.0.12",
+    "python-dotenv==1.0.1",
+    "asyncpg==0.30.0",
+    "sqlalchemy[asyncio]>=2.0.41",
+    "alembic>=1.15.2"
+]
+
+[project.scripts]
+z-ai2api = "main:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "requests>=2.30.0",
+    "ruff>=0.1.0",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py38"
+select = ["E", "F", "I", "B"]
+ignore = []
+
+[tool.ruff.isort]
+known-first-party = []
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]

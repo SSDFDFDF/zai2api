@@ -1,0 +1,117 @@
+<!-- 单个 Token 行组件 -->
+{% set success_rate = (token.successful_requests / token.total_requests * 100) if token.total_requests else 0 %}
+{% if not token.is_enabled %}
+{% set runtime_status_label = '禁用' %}
+{% set runtime_status_class = 'bg-slate-100 text-slate-600' %}
+{% set runtime_dot_class = 'bg-slate-400' %}
+{% elif token.token_type == 'guest' %}
+{% set runtime_status_label = '匿名' %}
+{% set runtime_status_class = 'bg-amber-100 text-amber-800' %}
+{% set runtime_dot_class = 'bg-amber-500' %}
+{% elif token.token_type != 'user' %}
+{% set runtime_status_label = '待识别' %}
+{% set runtime_status_class = 'bg-slate-100 text-slate-600' %}
+{% set runtime_dot_class = 'bg-slate-400' %}
+{% elif token.total_requests == 0 %}
+{% set runtime_status_label = '待使用' %}
+{% set runtime_status_class = 'bg-sky-100 text-sky-800' %}
+{% set runtime_dot_class = 'bg-sky-500' %}
+{% elif success_rate >= 50 or token.total_requests <= 3 %}
+{% set runtime_status_label = '运行中' %}
+{% set runtime_status_class = 'bg-emerald-100 text-emerald-800' %}
+{% set runtime_dot_class = 'bg-emerald-500' %}
+{% else %}
+{% set runtime_status_label = '失败偏多' %}
+{% set runtime_status_class = 'bg-rose-100 text-rose-800' %}
+{% set runtime_dot_class = 'bg-rose-500' %}
+{% endif %}
+
+<tr class="group hover:bg-slate-50/80 transition-all duration-200" id="token-row-{{ token.id }}">
+    <!-- ID -->
+    <td class="px-6 py-3 whitespace-nowrap text-sm text-slate-400 font-mono">
+        #{{ token.id }}
+    </td>
+
+    <!-- Token 信息 -->
+    <td class="px-6 py-3 whitespace-nowrap">
+        <div class="flex items-center space-x-2">
+            <span class="font-mono text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded border border-slate-200/50 truncate max-w-[200px]" title="{{ token.token }}">
+                {{ token.token[:32] }}...
+            </span>
+            <button onclick="copyToClipboard('{{ token.token }}')"
+                class="p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-200/50 rounded transition-all">
+                <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+            </button>
+            {% if token.token_type == 'user' %}
+            <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-emerald-50 text-emerald-600 border border-emerald-100">认证</span>
+            {% elif token.token_type == 'guest' %}
+            <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-600 border border-amber-100">匿名</span>
+            {% endif %}
+        </div>
+    </td>
+
+    <!-- 运行状态 -->
+    <td class="px-6 py-3 whitespace-nowrap text-center">
+        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium {{ runtime_status_class }}">
+            <span class="w-1.5 h-1.5 rounded-full mr-1.5 {{ runtime_dot_class }}"></span>
+            {{ runtime_status_label }}
+        </span>
+    </td>
+
+    <!-- 使用统计 -->
+    <td class="px-6 py-3 whitespace-nowrap text-center text-sm">
+        {% if token.total_requests %}
+        <span class="text-slate-900 font-medium">{{ token.successful_requests }}</span><span class="text-slate-300 mx-1">/</span><span class="text-slate-500">{{ token.total_requests }}</span>
+        <span class="ml-2 text-[10px] {{ 'text-emerald-600' if success_rate >= 80 else 'text-rose-600' }}">({{ "%.1f"|format(success_rate) }}%)</span>
+        {% else %}
+        <span class="text-slate-300 text-xs italic">未使用</span>
+        {% endif %}
+    </td>
+
+    <!-- 创建时间 -->
+    <td class="px-6 py-3 whitespace-nowrap text-xs text-slate-500 font-mono">
+        {{ (token.created_at|string)[:19] if token.created_at else '--' }}
+    </td>
+
+    <!-- 操作 -->
+    <td class="px-6 py-3 whitespace-nowrap text-right text-sm font-medium">
+        <div class="flex items-center justify-end space-x-1">
+            <button hx-post="/admin/api/tokens/toggle/{{ token.id }}?enabled={{ 'false' if token.is_enabled else 'true' }}"
+                hx-swap="outerHTML"
+                class="p-1 rounded-md transition-all {{ 'text-emerald-600 hover:bg-emerald-50' if token.is_enabled else 'text-slate-400 hover:bg-slate-100' }}"
+                title="{{ '点击禁用' if token.is_enabled else '点击启用' }}">
+                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    {% if token.is_enabled %}
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    {% else %}
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                    {% endif %}
+                </svg>
+            </button>
+
+            <button hx-post="/admin/api/tokens/validate-single/{{ token.id }}" hx-target="#token-row-{{ token.id }}"
+                hx-swap="outerHTML" hx-indicator="#validate-spinner-{{ token.id }}"
+                class="p-1 text-blue-600 hover:bg-blue-50 rounded-md transition-all relative validate-token-btn" title="手动检测">
+                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                <svg id="validate-spinner-{{ token.id }}" class="htmx-indicator absolute inset-1 h-4 w-4 animate-spin text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+            </button>
+
+            <button hx-delete="/admin/api/tokens/delete/{{ token.id }}" hx-target="#token-row-{{ token.id }}"
+                hx-swap="outerHTML swap:1s"
+                hx-confirm="确定删除？" 
+                class="p-1 text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-md transition-all"
+                title="删除">
+                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+            </button>
+        </div>
+    </td>
+</tr>

@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="h-full bg-gray-50">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}管理后台{% endblock %} - API 控制台</title>
+
+    <!-- Tailwind CSS (CDN) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Alpine.js Collapse Plugin + Core (CDN) -->
+    <script defer src="https://cdn.jsdelivr.net/npm/@alpinejs/collapse@3.x.x/dist/cdn.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+
+    <!-- htmx (CDN) -->
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+
+    <!-- 自定义样式 -->
+    <style>
+        [x-cloak] {
+            display: none !important;
+        }
+
+        /* 自定义滚动条 */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+
+        /* htmx 加载指示器 */
+        .htmx-indicator {
+            display: none;
+        }
+
+        .htmx-request .htmx-indicator {
+            display: inline-block;
+        }
+
+        .htmx-request.htmx-indicator {
+            display: inline-block;
+        }
+
+        /* 平滑过渡 */
+        .fade-in {
+            animation: fadeIn 0.3s ease-in;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+            }
+
+            to {
+                opacity: 1;
+            }
+        }
+    </style>
+
+    {% block extra_head %}{% endblock %}
+</head>
+
+<body class="h-full" x-data="{
+    sidebarOpen: true,
+    async logout() {
+        if (confirm('确定要登出吗？')) {
+            try {
+                const csrfToken = window.getAdminCsrfToken ? window.getAdminCsrfToken() : '';
+                const response = await fetch('/admin/api/logout', {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRF-Token': csrfToken
+                    }
+                });
+                if (response.ok) {
+                    window.location.href = '/admin/login';
+                }
+            } catch (err) {
+                console.error('登出失败:', err);
+                alert('登出失败，请稍后重试');
+            }
+        }
+    }
+}">
+    <div class="h-screen flex flex-col overflow-hidden">
+        <!-- 顶部导航栏 -->
+        <nav class="bg-slate-800 shadow-lg">
+            <div class="mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="flex h-16 items-center justify-between">
+                    <!-- Logo 和切换按钮 -->
+                    <div class="flex items-center">
+                        <button @click="sidebarOpen = !sidebarOpen"
+                            class="text-white hover:bg-slate-700 p-2 rounded-md">
+                            <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M4 6h16M4 12h16M4 18h16" />
+                            </svg>
+                        </button>
+                        <div class="ml-4 flex items-center">
+                            <h1 class="text-2xl font-bold text-white">API 管理后台</h1>
+                        </div>
+                    </div>
+
+                    <!-- 右侧信息 -->
+                    <div class="flex items-center space-x-4">
+                        <!-- 实时状态指示器 -->
+                        <div class="flex items-center text-white">
+                            <span class="relative flex h-3 w-3">
+                                <span
+                                    class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                                <span class="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
+                            </span>
+                            <span class="ml-2 text-sm">服务运行中</span>
+                        </div>
+
+                        <!-- 登出按钮 -->
+                        <button @click="logout()"
+                            class="flex items-center text-white hover:bg-slate-700 px-3 py-2 rounded-md text-sm font-medium transition-colors">
+                            <svg class="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                            </svg>
+                            登出
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </nav>
+
+        <div class="flex flex-1 min-h-0 overflow-hidden">
+            <!-- 侧边栏 -->
+            <aside x-show="sidebarOpen" x-transition:enter="transition ease-out duration-200"
+                x-transition:enter-start="transform -translate-x-full" x-transition:enter-end="transform translate-x-0"
+                x-transition:leave="transition ease-in duration-200" x-transition:leave-start="transform translate-x-0"
+                x-transition:leave-end="transform -translate-x-full" class="w-64 bg-white shadow-lg h-full overflow-y-auto">
+                <nav class="mt-5 px-2 space-y-1">
+                    {% set current_path = request.url.path %}
+
+                    <!-- 仪表盘 -->
+                    <a href="/admin"
+                        class="{% if current_path == '/admin' or current_path == '/admin/' %}bg-slate-100 text-indigo-700{% else %}text-gray-700 hover:bg-gray-100{% endif %} group flex items-center px-3 py-2 text-sm font-medium rounded-md">
+                        <svg class="mr-3 h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+                        </svg>
+                        仪表盘
+                    </a>
+
+                    <!-- 请求日志 -->
+                    <a href="/admin/request-logs"
+                        class="{% if '/request-logs' in current_path %}bg-slate-100 text-indigo-700{% else %}text-gray-700 hover:bg-gray-100{% endif %} group flex items-center px-3 py-2 text-sm font-medium rounded-md">
+                        <svg class="mr-3 h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                        </svg>
+                        请求日志
+                    </a>
+
+                    <!-- 配置管理 -->
+                    <a href="/admin/config"
+                        class="{% if '/config' in current_path %}bg-slate-100 text-indigo-700{% else %}text-gray-700 hover:bg-gray-100{% endif %} group flex items-center px-3 py-2 text-sm font-medium rounded-md">
+                        <svg class="mr-3 h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        </svg>
+                        配置管理
+                    </a>
+
+                    <!-- Token 管理 -->
+                    <a href="/admin/tokens"
+                        class="{% if '/tokens' in current_path %}bg-slate-100 text-indigo-700{% else %}text-gray-700 hover:bg-gray-100{% endif %} group flex items-center px-3 py-2 text-sm font-medium rounded-md">
+                        <svg class="mr-3 h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                        </svg>
+                        Token 管理
+                    </a>
+
+                    <!-- 分隔线 -->
+                    <div class="border-t border-gray-200 my-4"></div>
+
+                    <!-- API 文档 -->
+                    <a href="/docs" target="_blank"
+                        class="text-gray-700 hover:bg-gray-100 group flex items-center px-3 py-2 text-sm font-medium rounded-md">
+                        <svg class="mr-3 h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        API 文档
+                    </a>
+                </nav>
+            </aside>
+
+            <!-- 主内容区 -->
+            <main class="flex-1 p-6 flex flex-col min-h-0 overflow-auto">
+                <!-- 通知区域 -->
+                <div id="notification" class="mb-4 flex-shrink-0"></div>
+                
+                <!-- 页面内容 -->
+                <div class="fade-in flex-1 flex flex-col min-h-0">
+                    {% block content %}{% endblock %}
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <script>
+        function getCookieValue(name) {
+            const cookies = document.cookie.split('; ');
+            for (const cookie of cookies) {
+                const [k, ...v] = cookie.split('=');
+                if (k === name) return decodeURIComponent(v.join('='));
+            }
+            return '';
+        }
+
+        window.getAdminCsrfToken = function () {
+            return getCookieValue('admin_csrf');
+        };
+
+        document.body.addEventListener('htmx:configRequest', function (evt) {
+            const token = window.getAdminCsrfToken();
+            if (token) {
+                evt.detail.headers['X-CSRF-Token'] = token;
+            }
+        });
+    </script>
+
+    {% block extra_scripts %}{% endblock %}
+</body>
+
+</html>

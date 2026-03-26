@@ -1,0 +1,540 @@
+{% extends "base.html" %}
+
+{% block title %}Token 管理{% endblock %}
+
+{% block content %}
+<div class="flex-1 flex flex-col min-h-0 space-y-6" x-data='{
+    activeTab: "strategy",
+    showAddModal: false,
+    showValidateModal: false,
+    newToken: "",
+    bulkTokens: "",
+    hasImportSourceDir: {{ "true" if automation.has_import_source_dir else "false" }},
+    hasMaintenanceActions: {{ "true" if automation.has_maintenance_actions else "false" }},
+    isImporting: false,
+    isRunningMaintenance: false,
+    isValidating: false,
+    isUploading: false
+}'>
+    <!-- 页面标题 -->
+    <div class="flex items-center justify-between flex-shrink-0">
+        <div>
+            <h2 class="text-3xl font-bold text-gray-900">Token 管理</h2>
+            <p class="mt-1 text-sm text-gray-600">管理和维护当前服务使用的 Token</p>
+        </div>
+        <div class="flex flex-wrap gap-3">
+            <a href="{{ automation.config_url }}"
+                class="px-4 py-2 bg-slate-100 text-slate-700 rounded-md text-sm font-medium hover:bg-slate-200 flex items-center transition-colors">
+                <svg class="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+                配置中心
+            </a>
+            <button @click="showValidateModal = true"
+                class="px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-medium hover:bg-blue-700 flex items-center transition-colors shadow-sm">
+                <svg class="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                手动批量验证
+            </button>
+            <button @click="showAddModal = true"
+                class="px-4 py-2 bg-slate-800 text-white rounded-md text-sm font-medium hover:bg-slate-700 flex items-center transition-colors shadow-sm">
+                <svg class="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                </svg>
+                添加 Token
+            </button>
+        </div>
+    </div>
+
+    <!-- Tab 切换器 -->
+    <div class="border-b border-gray-200 flex-shrink-0">
+        <nav class="-mb-px flex space-x-8" aria-label="Tabs">
+            <button
+                @click="activeTab = 'strategy'"
+                :class="activeTab === 'strategy' ? 'border-slate-800 text-slate-800' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
+                class="whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm flex items-center transition-all">
+                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+                策略与统计
+            </button>
+            <button
+                @click="activeTab = 'list'"
+                :class="activeTab === 'list' ? 'border-slate-800 text-slate-800' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
+                class="whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm flex items-center transition-all">
+                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"></path></svg>
+                Token 列表
+                <span class="ml-2 bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full text-xs" id="token-count-badge">...</span>
+            </button>
+        </nav>
+    </div>
+
+    <!-- Tab 内容区域 -->
+    <div class="flex-1 min-h-0 relative">
+        <!-- 统计与策略 Tab -->
+        <div x-show="activeTab === 'strategy'" class="h-full overflow-y-auto space-y-6 pb-6">
+            <!-- 统计面板 -->
+            <div id="token-stats" hx-get="/admin/api/tokens/stats" hx-trigger="load, statsRefresh from:body"
+                hx-swap="innerHTML">
+                <!-- 加载中 -->
+                <div class="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
+                    {% for i in range(4) %}
+                    <div class="bg-white overflow-hidden shadow rounded-lg animate-pulse">
+                        <div class="p-5">
+                            <div class="h-4 bg-gray-200 rounded w-1/2 mb-2"></div>
+                            <div class="h-8 bg-gray-200 rounded w-1/3"></div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <!-- 自动化策略 -->
+            <div id="token-automation" class="grid grid-cols-1 gap-6 xl:grid-cols-2">
+                <section class="bg-white shadow rounded-lg p-6 space-y-5">
+                    <div class="flex items-start justify-between gap-4">
+                        <div>
+                            <h3 class="text-lg font-medium text-gray-900">目录导入策略</h3>
+                            <p class="mt-1 text-sm text-gray-600">配置入口已迁移到配置管理页。这里展示当前策略，并允许手动执行。</p>
+                        </div>
+                        <span class="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold {% if automation.import_enabled %}bg-emerald-100 text-emerald-700{% else %}bg-gray-100 text-gray-600{% endif %}">
+                            {{ '定时已开启' if automation.import_enabled else '定时已关闭' }}
+                        </span>
+                    </div>
+
+                    {% if automation.has_import_source_dir %}
+                    <div class="rounded-lg border border-emerald-100 bg-emerald-50 p-4 text-sm text-emerald-700">
+                        手动导入会复用当前配置的目录和验证逻辑，重复 Token 会自动跳过。
+                    </div>
+                    {% else %}
+                    <div class="rounded-lg border border-amber-100 bg-amber-50 p-4 text-sm text-amber-700">
+                        还没有配置导入目录，请先到配置管理页设置 `TOKEN_AUTO_IMPORT_SOURCE_DIR`。
+                    </div>
+                    {% endif %}
+
+                    <dl class="grid grid-cols-1 gap-4 sm:grid-cols-3 text-sm">
+                        <div class="rounded-lg border border-gray-200 p-4">
+                            <dt class="font-medium text-gray-700">Token 目录</dt>
+                            <dd class="mt-2 rounded-md bg-gray-50 px-3 py-2 font-mono text-xs text-gray-700 break-all">
+                                {{ automation.import_source_dir or '未配置' }}
+                            </dd>
+                        </div>
+                        <div class="rounded-lg border border-gray-200 p-4">
+                            <dt class="font-medium text-gray-700">扫描间隔</dt>
+                            <dd class="mt-2 text-gray-900 font-medium">{{ automation.import_interval }} 秒</dd>
+                        </div>
+                        <div class="rounded-lg border border-gray-200 p-4">
+                            <dt class="font-medium text-gray-700">配置位置</dt>
+                            <dd class="mt-2 text-gray-900">配置管理 / Token 池策略</dd>
+                        </div>
+                    </dl>
+
+                    <div class="flex flex-wrap gap-3 pt-2">
+                        <button type="button" hx-post="/admin/api/tokens/import-directory" hx-target="#notification"
+                            @htmx:before-request="isImporting = true"
+                            @htmx:after-request="isImporting = false; if ($event.detail.successful) { htmx.trigger('body', 'tokenListRefresh'); htmx.trigger('body', 'statsRefresh'); }"
+                            :disabled="isImporting || !hasImportSourceDir"
+                            class="px-4 py-2 bg-emerald-600 text-white rounded-md text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+                            立即导入
+                        </button>
+                    </div>
+                </section>
+
+                <section class="bg-white shadow rounded-lg p-6 space-y-5">
+                    <div class="flex items-start justify-between gap-4">
+                        <div>
+                            <h3 class="text-lg font-medium text-gray-900">自动维护策略</h3>
+                            <p class="mt-1 text-sm text-gray-600">维护动作和定时间隔在配置管理页设置。这里展示当前策略，并允许手动执行。</p>
+                        </div>
+                        <span class="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold {% if automation.maintenance_enabled %}bg-blue-100 text-blue-700{% else %}bg-gray-100 text-gray-600{% endif %}">
+                            {{ '定时已开启' if automation.maintenance_enabled else '定时已关闭' }}
+                        </span>
+                    </div>
+
+                    {% if automation.has_maintenance_actions %}
+                    <div class="rounded-lg border border-blue-100 bg-blue-50 p-4 text-sm text-blue-700">
+                        手动维护将按配置执行去重、测活和失效清理。
+                    </div>
+                    {% else %}
+                    <div class="rounded-lg border border-amber-100 bg-amber-50 p-4 text-sm text-amber-700">
+                        当前没有配置任何维护动作。请先到配置管理页勾选维护动作。
+                    </div>
+                    {% endif %}
+
+                    <dl class="grid grid-cols-1 gap-4 sm:grid-cols-3 text-sm">
+                        <div class="rounded-lg border border-gray-200 p-4">
+                            <dt class="font-medium text-gray-700">维护间隔</dt>
+                            <dd class="mt-2 text-gray-900 font-medium">{{ automation.maintenance_interval }} 秒</dd>
+                        </div>
+                        <div class="rounded-lg border border-gray-200 p-4">
+                            <dt class="font-medium text-gray-700">配置位置</dt>
+                            <dd class="mt-2 text-gray-900">配置管理 / Token 池策略</dd>
+                        </div>
+                        <div class="rounded-lg border border-gray-200 p-4">
+                            <dt class="font-medium text-gray-700">当前维护动作</dt>
+                            <dd class="mt-2 flex flex-wrap gap-2 text-xs">
+                                {% if automation.maintenance_actions %}
+                                {% for action in automation.maintenance_actions %}
+                                <span class="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 font-semibold text-blue-700">{{ action }}</span>
+                                {% endfor %}
+                                {% else %}
+                                <span class="text-gray-500">未配置</span>
+                                {% endif %}
+                            </dd>
+                        </div>
+                    </dl>
+
+                    <div class="flex flex-wrap gap-3 pt-2">
+                        <button type="button" hx-post="/admin/api/tokens/maintenance/run" hx-target="#notification"
+                            @htmx:before-request="isRunningMaintenance = true"
+                            @htmx:after-request="isRunningMaintenance = false; if ($event.detail.successful) { htmx.trigger('body', 'tokenListRefresh'); htmx.trigger('body', 'statsRefresh'); }"
+                            :disabled="isRunningMaintenance || !hasMaintenanceActions"
+                            class="px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+                            立即维护
+                        </button>
+                    </div>
+                </section>
+            </div>
+        </div>
+
+        <!-- Token 列表 Tab -->
+        <div x-show="activeTab === 'list'" class="h-full flex flex-col min-h-0 bg-white shadow rounded-lg overflow-hidden" x-cloak>
+            <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between flex-shrink-0">
+                <div>
+                    <h3 class="text-lg font-medium text-gray-900">Token 列表</h3>
+                    <p class="mt-1 text-xs text-gray-500">页面加载只展示配置与最近请求统计，不会主动探测 Token 可用性；检测仅在手动点击后执行。</p>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <button hx-post="/admin/api/tokens/sync-pool" hx-target="#notification"
+                        class="text-sm text-purple-600 hover:text-purple-700 flex items-center transition-colors">
+                        <svg class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                        同步 Token 池
+                    </button>
+                    <button hx-post="/admin/api/tokens/health-check" hx-target="#notification"
+                        class="text-sm text-blue-600 hover:text-blue-700 flex items-center transition-colors">
+                        <svg class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        手动健康检查
+                    </button>
+                </div>
+            </div>
+            <div id="token-list" hx-get="/admin/api/tokens/list?page=1&page_size=20" hx-trigger="load" hx-swap="innerHTML" class="flex-1 overflow-auto">
+                <div class="flex justify-center items-center py-12">
+                    <svg class="animate-spin h-8 w-8 text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                </div>
+            </div>
+        </div>
+
+        <!-- 添加 Token 弹窗 -->
+        <div x-show="showAddModal" x-transition:enter="transition ease-out duration-300"
+            x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
+            class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50"
+            @click.self="showAddModal = false" x-cloak>
+            <div class="relative top-20 mx-auto p-5 border w-full max-w-2xl shadow-lg rounded-md bg-white">
+                <div class="flex items-center justify-between pb-3 border-b">
+                    <h3 class="text-lg font-medium">添加 Token</h3>
+                    <button @click="showAddModal = false" class="text-gray-400 hover:text-gray-600">
+                        <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                    </button>
+                </div>
+
+                <div class="mt-4 space-y-4">
+                    <!-- 提示信息 -->
+                    <div class="bg-blue-50 border-l-4 border-blue-400 p-4">
+                        <div class="flex">
+                            <div class="flex-shrink-0">
+                                <svg class="h-5 w-5 text-blue-400" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd"
+                                        d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
+                                        clip-rule="evenodd" />
+                                </svg>
+                            </div>
+                            <div class="ml-3">
+                                <p class="text-sm text-blue-700">
+                                    <strong>Token 验证：</strong>添加时将自动验证 Token 有效性，
+                                    <span class="font-semibold">匿名用户 Token (guest) 将被拒绝</span>。
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 单个 Token -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">单个 Token</label>
+                        <input type="text" x-model="newToken" placeholder="输入 Token（以 eyJ 开头的 JWT）"
+                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm">
+                    </div>
+
+                    <!-- 批量导入 -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">批量导入（每行一个）</label>
+                        <textarea x-model="bulkTokens" rows="6"
+                            placeholder="每行一个 Token，支持逗号分隔&#10;eyJhbGc...&#10;eyJhbGc...&#10;或: token1, token2, token3"
+                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm font-mono text-xs"></textarea>
+                        <p class="mt-1 text-sm text-gray-500">支持格式：每行一个 Token，或使用逗号分隔</p>
+                    </div>
+
+                    <!-- 分隔线 -->
+                    <div class="relative py-2">
+                        <div class="absolute inset-0 flex items-center">
+                            <div class="w-full border-t border-gray-200"></div>
+                        </div>
+                        <div class="relative flex justify-center text-sm">
+                            <span class="px-3 bg-white text-gray-500 font-medium">或上传 JSON 文件</span>
+                        </div>
+                    </div>
+
+                    <!-- 上传 JSON 文件 -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">上传 Token JSON 文件</label>
+                        <div
+                            class="border-2 border-dashed border-gray-300 rounded-lg p-4 hover:border-indigo-400 transition-colors">
+                            <form id="upload-form" hx-post="/admin/api/tokens/import-upload" hx-target="#notification"
+                                hx-encoding="multipart/form-data" @htmx:before-request="isUploading = true"
+                                @htmx:after-request="isUploading = false; if ($event.detail.successful) { htmx.trigger('body', 'tokenListRefresh'); htmx.trigger('body', 'statsRefresh'); } document.getElementById('upload-file-input').value = ''; document.getElementById('upload-file-info').textContent = '未选择文件'">
+                                <div class="text-center">
+                                    <svg class="mx-auto h-10 w-10 text-gray-400" fill="none" viewBox="0 0 24 24"
+                                        stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                            d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                                    </svg>
+                                    <label for="upload-file-input"
+                                        class="mt-2 cursor-pointer inline-flex items-center px-3 py-1.5 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50">
+                                        选择 JSON 文件
+                                    </label>
+                                    <input id="upload-file-input" type="file" name="files" multiple accept=".json"
+                                        class="hidden"
+                                        onchange="var count = this.files.length; document.getElementById('upload-file-info').textContent = count > 0 ? '已选择 ' + count + ' 个文件' : '未选择文件';">
+                                    <p id="upload-file-info" class="mt-2 text-xs text-gray-500">未选择文件</p>
+                                    <p class="mt-1 text-xs text-gray-400">支持选择多个 .json 文件，每个文件应包含 token 字段</p>
+                                </div>
+                                <div class="mt-3 flex justify-center">
+                                    <button type="submit" :disabled="isUploading"
+                                        class="px-4 py-2 bg-emerald-600 text-white rounded-md text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center">
+                                        <template x-if="isUploading">
+                                            <svg class="animate-spin h-4 w-4 mr-2" xmlns="http://www.w3.org/2000/svg"
+                                                fill="none" viewBox="0 0 24 24">
+                                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor"
+                                                    stroke-width="4"></circle>
+                                                <path class="opacity-75" fill="currentColor"
+                                                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
+                                                </path>
+                                            </svg>
+                                        </template>
+                                        <svg x-show="!isUploading" class="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24"
+                                            stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                                        </svg>
+                                        <span x-text="isUploading ? '上传导入中...' : '上传并导入'"></span>
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+
+                    <!-- 提交按钮 -->
+                    <div class="flex justify-end space-x-3 pt-4 border-t">
+                        <button @click="showAddModal = false"
+                            class="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50">
+                            取消
+                        </button>
+                        <button hx-post="/admin/api/tokens/add" :hx-vals="JSON.stringify({
+                                single_token: newToken,
+                                bulk_tokens: bulkTokens
+                            })" hx-target="#notification"
+                            @htmx:after-request="showAddModal = false; newToken = ''; bulkTokens = ''; htmx.trigger('body', 'tokenListRefresh'); htmx.trigger('body', 'statsRefresh')"
+                            class="px-4 py-2 bg-slate-800 text-white rounded-md text-sm font-medium hover:bg-slate-700">
+                            添加
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 批量验证弹窗 -->
+        <div x-show="showValidateModal" x-transition:enter="transition ease-out duration-300"
+            x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
+            class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50"
+            @click.self="showValidateModal = false" x-cloak>
+            <div class="relative top-20 mx-auto p-5 border w-full max-w-lg shadow-lg rounded-md bg-white">
+                <div class="flex items-center justify-between pb-3 border-b">
+                    <h3 class="text-lg font-medium">批量验证 Token</h3>
+                    <button @click="showValidateModal = false" class="text-gray-400 hover:text-gray-600">
+                        <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                    </button>
+                </div>
+
+                <div class="mt-4 space-y-4">
+                    <!-- 警告信息 -->
+                    <div class="bg-yellow-50 border-l-4 border-yellow-400 p-4">
+                        <div class="flex">
+                            <div class="flex-shrink-0">
+                                <svg class="h-5 w-5 text-yellow-400" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd"
+                                        d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
+                                        clip-rule="evenodd" />
+                                </svg>
+                            </div>
+                            <div class="ml-3">
+                                <p class="text-sm text-yellow-700">
+                                    只有点击“开始验证”后，才会请求检测接口验证当前通道的所有 Token。
+                                    <br>此操作可能需要较长时间，请耐心等待。
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 验证说明 -->
+                    <div class="text-sm text-gray-600 space-y-2">
+                        <p><strong>验证内容：</strong></p>
+                        <ul class="list-disc list-inside space-y-1 ml-4">
+                            <li>检查 Token 是否有效</li>
+                            <li>识别 Token 类型（认证用户 / 匿名用户）</li>
+                            <li>更新数据库中的 Token 类型</li>
+                            <li>匿名用户 Token 将被标记为不健康</li>
+                        </ul>
+                        <p class="text-xs text-gray-500">页面不会在加载、翻页或刷新统计时自动触发这些检测请求。</p>
+                    </div>
+
+                    <!-- 进度显示 -->
+                    <div id="validate-progress" class="hidden">
+                        <div class="flex items-center justify-center py-4">
+                            <svg class="animate-spin h-8 w-8 text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none"
+                                viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4">
+                                </circle>
+                                <path class="opacity-75" fill="currentColor"
+                                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
+                                </path>
+                            </svg>
+                            <span class="ml-3 text-gray-700">验证中...</span>
+                        </div>
+                    </div>
+
+                    <!-- 提交按钮 -->
+                    <div class="flex justify-end space-x-3 pt-4 border-t">
+                        <button @click="showValidateModal = false" :disabled="isValidating"
+                            class="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed">
+                            取消
+                        </button>
+                        <button hx-post="/admin/api/tokens/validate" hx-target="#notification"
+                            @htmx:before-request="isValidating = true; document.getElementById('validate-progress').classList.remove('hidden')"
+                            @htmx:after-request="isValidating = false; showValidateModal = false; document.getElementById('validate-progress').classList.add('hidden'); htmx.trigger('body', 'tokenListRefresh'); htmx.trigger('body', 'statsRefresh')"
+                            :disabled="isValidating"
+                            class="px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed">
+                            开始验证
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    window.tokenListPage = 1;
+    window.tokenListPageSize = 20;
+
+    function loadTokenListPage(page) {
+        const nextPage = Math.max(1, Number(page) || 1);
+        window.tokenListPage = nextPage;
+        const url = `/admin/api/tokens/list?page=${nextPage}&page_size=${window.tokenListPageSize}`;
+        htmx.ajax('GET', url, {
+            target: '#token-list',
+            swap: 'innerHTML'
+        }).then(() => {
+            // 更新 Tab 上的计数
+            const countText = document.getElementById('token-count')?.textContent;
+            if (countText) {
+                document.getElementById('token-count-badge').textContent = countText.replace(/[()]/g, '');
+            }
+        });
+    }
+
+    // 全局通知函数
+    function showNotification(message, type = 'success') {
+        const notification = document.createElement('div');
+        const bgColor = type === 'success' ? 'bg-green-500' : type === 'error' ? 'bg-red-500' : 'bg-blue-500';
+        notification.className = `fixed top-4 right-4 ${bgColor} text-white px-6 py-3 rounded-lg shadow-lg z-50 transition-all transform`;
+        notification.style.animation = 'slideInRight 0.3s ease-out';
+        notification.innerHTML = `
+        <div class="flex items-center space-x-2">
+            <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+            </svg>
+            <span class="font-medium">${message}</span>
+        </div>
+    `;
+
+        document.body.appendChild(notification);
+
+        // 3秒后自动消失
+        setTimeout(() => {
+            notification.style.opacity = '0';
+            notification.style.transform = 'translateX(100%)';
+            setTimeout(() => notification.remove(), 300);
+        }, 3000);
+    }
+
+    // 添加动画样式
+    if (!document.getElementById('notification-styles')) {
+        const style = document.createElement('style');
+        style.id = 'notification-styles';
+        style.textContent = `
+        @keyframes slideInRight {
+            from {
+                opacity: 0;
+                transform: translateX(100%);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+    `;
+        document.head.appendChild(style);
+    }
+
+    // 监听验证按钮的完成事件
+    document.body.addEventListener('htmx:afterSwap', function (evt) {
+        // 检查是否是验证按钮触发的事件
+        if (evt.detail.target && evt.detail.target.id && evt.detail.target.id.startsWith('token-row-')) {
+            // 从目标元素提取 token ID
+            const tokenId = evt.detail.target.id.replace('token-row-', '');
+
+            // 检查是否是验证操作（通过查看触发元素）
+            const triggerElt = evt.detail.requestConfig?.elt;
+            if (triggerElt && triggerElt.classList.contains('validate-token-btn')) {
+                showNotification(`✓ Token ID ${tokenId} 验证完成`, 'success');
+
+                // 同时刷新统计数据
+                htmx.trigger('body', 'statsRefresh');
+            }
+        }
+    });
+
+    document.body.addEventListener('tokenListRefresh', function () {
+        loadTokenListPage(window.tokenListPage || 1);
+    });
+</script>
+{% endblock %}

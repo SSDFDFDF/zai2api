@@ -1,0 +1,54 @@
+# Git files
+.git
+.gitignore
+.gitattributes
+
+# Python cache
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Documentation
+*.md
+!README.md
+docs/
+
+# Test files
+tests/
+pytest.ini
+.pytest_cache/
+
+# Local data (will be mounted as volumes)
+*.db
+*.sqlite
+*.sqlite3
+logs/
+data/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Docker files in parent directory
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Other
+.env.local
+.DS_Store
