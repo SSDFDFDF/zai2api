@@ -24,6 +24,9 @@ def content_to_text(content: Any) -> str:
     if isinstance(content, list):
         parts: List[str] = []
         for item in content:
+            if isinstance(item, str) and item:
+                parts.append(item)
+                continue
             if isinstance(item, dict) and item.get("type") == "text":
                 text = item.get("text")
                 if isinstance(text, str) and text:
@@ -173,10 +176,11 @@ def build_session_body_messages(
     # ---- New session: handle system prompt ----
     system_parts: List[str] = []
     for msg in normalized_messages:
-        if msg.get("role") == "system":
-            c = msg.get("content", "")
-            if isinstance(c, str) and c.strip():
-                system_parts.append(c.strip())
+        if msg.get("role") != "system":
+            continue
+        system_text_part = content_to_text(msg.get("content")).strip()
+        if system_text_part:
+            system_parts.append(system_text_part)
     system_text = "\n\n".join(system_parts)
 
     # Build history content (for multi-message recovery)
@@ -211,7 +215,7 @@ def get_precreate_content(
     """
     parts: List[str] = []
     for msg in session_body_messages:
-        c = msg.get("content", "")
-        if c:
-            parts.append(c)
+        text = content_to_text(msg.get("content")).strip()
+        if text:
+            parts.append(text)
     return "\n\n".join(parts)
