@@ -212,7 +212,7 @@ async def handle_options():
 @app.get("/")
 async def root():
     """Root endpoint"""
-    return {"message": "OpenAI-compatible chat completions API server"}
+    return {"message": "running"}
 
 
 def run_server():
