@@ -52,6 +52,7 @@ from app.core.session.session_content import (
     inject_system_prompt,
 )
 from app.core.file_upload import upload_file as _upload_file
+from app.core.httpx_errors import normalize_httpx_exception, normalize_httpx_response
 from app.core.openai_compat import (
     get_error_message,
     handle_error,
@@ -696,9 +697,28 @@ class UpstreamClient:
                     )
                     return parsed_models
                 else:
-                    self.logger.warning("获取在线模型失败，状态码: %s", response.status_code)
+                    self.logger.warning(
+                        "%s",
+                        normalize_httpx_response(
+                            response.status_code,
+                            response.text,
+                            content_type=response.headers.get("content-type"),
+                            method="GET",
+                            url=f"{self.base_url}/api/models",
+                            context="upstream.models",
+                        ),
+                    )
             except Exception as exc:
-                self.logger.warning("获取在线模型异常", exc_info=True)
+                self.logger.warning(
+                    "%s",
+                    normalize_httpx_exception(
+                        exc,
+                        method="GET",
+                        url=f"{self.base_url}/api/models",
+                        context="upstream.models",
+                    ),
+                    exc_info=True,
+                )
 
         return self._online_models or []
 
@@ -796,15 +816,37 @@ class UpstreamClient:
                     break
                 else:
                     self.logger.warning(
-                        "直连获取匿名令牌失败，状态码: %s", response.status_code
+                        "%s",
+                        normalize_httpx_response(
+                            response.status_code,
+                            response.text,
+                            content_type=response.headers.get("content-type"),
+                            method="GET",
+                            url=self.auth_url,
+                            context="guest_auth.direct",
+                        ),
                     )
             except httpx.TimeoutException as exc:
                 self.logger.warning(
-                    "直连获取匿名令牌超时 (第%s次): %s", retry_count + 1, exc
+                    "%s",
+                    normalize_httpx_exception(
+                        exc,
+                        method="GET",
+                        url=self.auth_url,
+                        context="guest_auth.direct",
+                        attempt=retry_count + 1,
+                    ),
                 )
             except httpx.ConnectError as exc:
                 self.logger.warning(
-                    "直连获取匿名令牌连接错误 (第%s次): %s", retry_count + 1, exc
+                    "%s",
+                    normalize_httpx_exception(
+                        exc,
+                        method="GET",
+                        url=self.auth_url,
+                        context="guest_auth.direct",
+                        attempt=retry_count + 1,
+                    ),
                 )
             except json.JSONDecodeError as exc:
                 self.logger.warning(
@@ -812,8 +854,14 @@ class UpstreamClient:
                 )
             except Exception as exc:
                 self.logger.warning(
-                    "直连获取匿名令牌失败 (第%s次)",
-                    retry_count + 1,
+                    "%s",
+                    normalize_httpx_exception(
+                        exc,
+                        method="GET",
+                        url=self.auth_url,
+                        context="guest_auth.direct",
+                        attempt=retry_count + 1,
+                    ),
                     exc_info=True,
                 )
 
@@ -1148,10 +1196,15 @@ class UpstreamClient:
                     if is_page_error:
                         await self._release_guest_session(transformed)
                         self.logger.error(
-                            "%s 返回网页错误: status=%s, content_type=%s",
-                            self.name,
-                            response.status_code,
-                            content_type,
+                            "%s",
+                            normalize_httpx_response(
+                                response.status_code,
+                                response_text,
+                                content_type=content_type,
+                                method="POST",
+                                url=transformed["url"],
+                                context="upstream.non_stream.page",
+                            ),
                         )
                         return (
                             self._build_upstream_error_response(
@@ -1223,7 +1276,17 @@ class UpstreamClient:
                                     Exception(error_message or error_msg),
                                 )
                         await self._release_guest_session(transformed)
-                        self.logger.error("%s 响应失败: %s", self.name, error_msg)
+                        self.logger.error(
+                            "%s",
+                            normalize_httpx_response(
+                                response.status_code,
+                                response_text,
+                                content_type=content_type,
+                                method="POST",
+                                url=transformed["url"],
+                                context="upstream.non_stream.response",
+                            ),
+                        )
                         return (
                             self._build_upstream_error_response(
                                 response.status_code,
@@ -1311,7 +1374,15 @@ class UpstreamClient:
                     timeout=max(0.1, _remaining_timeout()),
                 )
             except asyncio.TimeoutError as e:
-                self.logger.error("上游连接超时: %s", e)
+                self.logger.error(
+                    "%s",
+                    normalize_httpx_exception(
+                        e,
+                        method="POST",
+                        url=transformed["url"],
+                        context="upstream.stream.connect",
+                    ),
+                )
                 if self._is_guest_auth(transformed):
                     await self._release_guest_session(transformed)
                 elif current_token:
@@ -1326,8 +1397,13 @@ class UpstreamClient:
             except Exception as e:
                 friendly_msg = get_error_message(e)
                 self.logger.error(
-                    "上游连接异常: %s (raw: %s)",
-                    friendly_msg,
+                    "%s (raw: %s)",
+                    normalize_httpx_exception(
+                        e,
+                        method="POST",
+                        url=transformed["url"],
+                        context="upstream.stream.connect",
+                    ),
                     e,
                 )
                 if self._is_guest_auth(transformed):
@@ -1376,9 +1452,15 @@ class UpstreamClient:
                 if is_page_error:
                     await response.aclose()
                     self.logger.error(
-                        "上游返回网页错误: status=%s, content_type=%s",
-                        response.status_code,
-                        content_type,
+                        "%s",
+                        normalize_httpx_response(
+                            response.status_code,
+                            error_msg,
+                            content_type=content_type,
+                            method="POST",
+                            url=transformed["url"],
+                            context="upstream.stream.page",
+                        ),
                     )
                     await self._release_guest_session(transformed)
                     return self._build_upstream_error_response(
@@ -1445,9 +1527,17 @@ class UpstreamClient:
 
                 if response.status_code != 200:
                     await response.aclose()
-                    self.logger.error("上游返回错误: %s", response.status_code)
-                    if error_msg:
-                        self.logger.error("错误详情: %s", error_msg)
+                    self.logger.error(
+                        "%s",
+                        normalize_httpx_response(
+                            response.status_code,
+                            error_msg,
+                            content_type=content_type,
+                            method="POST",
+                            url=transformed["url"],
+                            context="upstream.stream.response",
+                        ),
+                    )
 
                     if not self._is_guest_auth(transformed) and current_token:
                         await self.mark_token_failure(

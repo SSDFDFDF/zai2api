@@ -1,6 +1,7 @@
 import pytest
 import httpx
 from unittest.mock import AsyncMock, MagicMock
+from app.core.httpx_errors import normalize_httpx_exception, normalize_httpx_response
 from app.core.openai_compat import get_error_message, resolve_http_error_status
 from app.core.retry_policy import extract_upstream_error_details
 from app.core.upstream import UpstreamClient
@@ -75,6 +76,40 @@ def test_get_error_message_summarizes_blocked_doctype_html():
     message = get_error_message(Exception(BLOCKED_HTML))
 
     assert message == "上游返回网页错误"
+
+
+def test_normalize_httpx_exception_fallback_message():
+    class EmptyError(Exception):
+        def __str__(self):
+            return ""
+
+    message = normalize_httpx_exception(
+        EmptyError(),
+        method="GET",
+        url="https://chat.z.ai/api/v1/auths/",
+        context="guest_session.create",
+        attempt=2,
+    )
+    assert "guest_session.create" in message
+    assert "HTTP GET" in message
+    assert "attempt=2" in message
+    assert "EmptyError" in message
+
+
+def test_normalize_httpx_response_summarizes_html():
+    message = normalize_httpx_response(
+        403,
+        WAF_HTML,
+        content_type="text/html",
+        method="POST",
+        url="https://chat.z.ai/api/v1/chats/",
+        context="upstream.stream.page",
+    )
+    assert "upstream.stream.page" in message
+    assert "HTTP POST" in message
+    assert "403" in message
+    assert "上游网页访问被拦截" in message
+    assert "<body>" not in message
 
 
 @pytest.mark.parametrize(

@@ -20,6 +20,7 @@ from typing import Optional
 
 import httpx
 
+from app.core.httpx_errors import normalize_httpx_exception
 from app.utils.logger import logger
 from app.utils.user_agent import get_random_user_agent
 
@@ -118,8 +119,13 @@ async def get_latest_fe_version(force_refresh: bool = False) -> str:
                 raise Exception("Unable to locate X-FE-Version in landing page")
         except Exception as exc:
             logger.exception(
-                "[Z.AI] Failed to fetch X-FE-Version from %s",
-                FE_VERSION_SOURCE_URL,
+                "%s",
+                normalize_httpx_exception(
+                    exc,
+                    method="GET",
+                    url=FE_VERSION_SOURCE_URL,
+                    context="fe_version.fetch",
+                ),
             )
             if _cached_version:
                 return _cached_version

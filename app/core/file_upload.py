@@ -16,6 +16,7 @@ from urllib.parse import quote
 
 import httpx
 
+from app.core.httpx_errors import normalize_httpx_exception, normalize_httpx_response
 from app.utils.logger import logger
 from app.core.config import settings
 
@@ -119,7 +120,15 @@ async def upload_file(
 
         if response.status_code != 200:
             logger.error(
-                f"❌ 文件上传失败: {response.status_code} - {response.text}"
+                "❌ 文件上传失败: %s",
+                normalize_httpx_response(
+                    response.status_code,
+                    response.text,
+                    content_type=response.headers.get("content-type"),
+                    method="POST",
+                    url=upload_url,
+                    context="file_upload",
+                ),
             )
             return None
 
@@ -155,5 +164,13 @@ async def upload_file(
         }
 
     except Exception as e:
-        logger.exception("❌ 文件上传异常")
+        logger.exception(
+            "❌ 文件上传异常: %s",
+            normalize_httpx_exception(
+                e,
+                method="POST",
+                url=upload_url,
+                context="file_upload",
+            ),
+        )
         return None

@@ -193,7 +193,7 @@ async def write_request_log(
         if masked_upstream_auth_token
         else ""
     )
-    logger.debug(
+    logger.info(
         "[%s] [%s] %s%s%s | In: %s | Out: %s | %.2fs",
         status_tag,
         provider,

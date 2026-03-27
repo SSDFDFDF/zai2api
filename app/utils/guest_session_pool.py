@@ -15,6 +15,7 @@ import jwt
 from app.core.config import settings
 from app.core.http_client import SharedHttpClients
 from app.core.headers import build_dynamic_headers as _build_dynamic_headers
+from app.core.httpx_errors import normalize_httpx_exception, normalize_httpx_response
 from app.utils.fe_version import get_latest_fe_version
 from app.utils.logger import logger
 
@@ -79,12 +80,6 @@ class GuestSessionPool:
         self._http_clients = SharedHttpClients(follow_redirects=True)
         self._background_tasks: Set[asyncio.Task] = set()
         self._cleanup_parallelism = max(1, settings.GUEST_CLEANUP_PARALLELISM)
-
-    @staticmethod
-    def _format_exception_message(exc: Exception) -> str:
-        """格式化异常消息，避免日志中出现空字符串。"""
-        message = str(exc).strip()
-        return message or "无错误详情"
 
     @staticmethod
     def _is_retryable_create_error(exc: Exception) -> bool:
@@ -183,11 +178,14 @@ class GuestSessionPool:
             except Exception as exc:
                 if self._is_retryable_create_error(exc):
                     logger.warning(
-                        "⚠️ 匿名会话创建网络异常 (%s/%s): [%s] %s",
-                        attempt,
-                        max_retries,
-                        type(exc).__name__,
-                        self._format_exception_message(exc),
+                        "⚠️ %s",
+                        normalize_httpx_exception(
+                            exc,
+                            method="GET",
+                            url=AUTH_URL,
+                            context="guest_session.create",
+                            attempt=attempt,
+                        ),
                     )
                     if attempt < max_retries:
                         await asyncio.sleep(min(2 ** (attempt - 1), 4))
@@ -217,13 +215,25 @@ class GuestSessionPool:
                 return True
 
             logger.warning(
-                f"⚠️ 清理匿名会话聊天记录失败: {session.user_id}, "
-                f"HTTP {response.status_code}, body={response.text[:200]}"
+                "⚠️ 清理匿名会话聊天记录失败: %s",
+                normalize_httpx_response(
+                    response.status_code,
+                    response.text,
+                    content_type=response.headers.get("content-type"),
+                    method="DELETE",
+                    url=CHATS_URL,
+                    context=f"guest_session.cleanup:{session.user_id}",
+                ),
             )
         except Exception as exc:
             logger.warning(
                 "⚠️ 清理匿名会话聊天记录异常: %s",
-                session.user_id,
+                normalize_httpx_exception(
+                    exc,
+                    method="DELETE",
+                    url=CHATS_URL,
+                    context=f"guest_session.cleanup:{session.user_id}",
+                ),
                 exc_info=True,
             )
 
@@ -266,12 +276,22 @@ class GuestSessionPool:
                             self._sessions[result.user_id] = result
                             created += 1
                         elif isinstance(result, Exception):
-                            exc_type = type(result).__name__
-                            exc_msg = self._format_exception_message(result)
-                            errors.add(f"[{exc_type}] {exc_msg}")
+                            errors.add(
+                                normalize_httpx_exception(
+                                    result,
+                                    method="GET",
+                                    url=AUTH_URL,
+                                    context="guest_session.create",
+                                )
+                            )
 
                 if errors:
-                    logger.warning(f"⚠️ 匿名会话池补齐失败 (成功 {created}/{need}): {', '.join(errors)}")
+                    logger.warning(
+                        "⚠️ 匿名会话池补齐失败 (成功 %s/%s): %s",
+                        created,
+                        need,
+                        ", ".join(sorted(errors)),
+                    )
 
                 if created == 0:
                     return False
@@ -371,12 +391,22 @@ class GuestSessionPool:
                     self._sessions[result.user_id] = result
                     created += 1
                 elif isinstance(result, Exception):
-                    exc_type = type(result).__name__
-                    exc_msg = self._format_exception_message(result)
-                    errors.add(f"[{exc_type}] {exc_msg}")
+                    errors.add(
+                        normalize_httpx_exception(
+                            result,
+                            method="GET",
+                            url=AUTH_URL,
+                            context="guest_session.create",
+                        )
+                    )
 
         if errors:
-            logger.warning(f"⚠️ 匿名会话池初始化失败 (成功 {created}/{self.pool_size}): {', '.join(errors)}")
+            logger.warning(
+                "⚠️ 匿名会话池初始化失败 (成功 %s/%s): %s",
+                created,
+                self.pool_size,
+                ", ".join(sorted(errors)),
+            )
 
         if created == 0:
             try:

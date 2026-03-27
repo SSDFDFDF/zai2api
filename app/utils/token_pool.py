@@ -19,6 +19,7 @@ from typing import Dict, List, Optional, Set, Tuple
 
 import httpx
 
+from app.core.httpx_errors import normalize_httpx_exception
 from app.utils.logger import logger
 
 
@@ -135,12 +136,39 @@ class ZAITokenValidator:
                 # 解析响应
                 return cls._parse_auth_response(response)
 
-        except httpx.TimeoutException:
-            return ("unknown", False, "请求超时")
-        except httpx.ConnectError:
-            return ("unknown", False, "连接失败")
+        except httpx.TimeoutException as exc:
+            return (
+                "unknown",
+                False,
+                normalize_httpx_exception(
+                    exc,
+                    method="GET",
+                    url=cls.AUTH_URL,
+                    context="token.validate",
+                ),
+            )
+        except httpx.ConnectError as exc:
+            return (
+                "unknown",
+                False,
+                normalize_httpx_exception(
+                    exc,
+                    method="GET",
+                    url=cls.AUTH_URL,
+                    context="token.validate",
+                ),
+            )
         except Exception as e:
-            return ("unknown", False, f"验证异常: {str(e)}")
+            return (
+                "unknown",
+                False,
+                normalize_httpx_exception(
+                    e,
+                    method="GET",
+                    url=cls.AUTH_URL,
+                    context="token.validate",
+                ),
+            )
 
     @staticmethod
     def _parse_auth_response(response: httpx.Response) -> Tuple[str, bool, Optional[str]]:
