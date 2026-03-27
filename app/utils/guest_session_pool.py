@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from threading import Lock
 from typing import Dict, Any, List, Optional, Set
 
+import httpx
 import jwt
 
 from app.core.config import settings
@@ -79,6 +80,16 @@ class GuestSessionPool:
         self._background_tasks: Set[asyncio.Task] = set()
         self._cleanup_parallelism = max(1, settings.GUEST_CLEANUP_PARALLELISM)
 
+    @staticmethod
+    def _format_exception_message(exc: Exception) -> str:
+        """格式化异常消息，避免日志中出现空字符串。"""
+        message = str(exc).strip()
+        return message or "无错误详情"
+
+    @staticmethod
+    def _is_retryable_create_error(exc: Exception) -> bool:
+        """匿名会话创建阶段，哪些异常值得重试。"""
+        return isinstance(exc, httpx.TransportError)
 
     def _track_background_task(self, coro) -> asyncio.Task:
         """跟踪后台任务，避免清理阻塞前台重试路径。"""
@@ -124,49 +135,66 @@ class GuestSessionPool:
         
         从上游获取真实 token，并解密其内部值作为 session 元数据。
         """
-        fe_version = await get_latest_fe_version()
-        headers = _build_dynamic_headers(fe_version)
-        
-        try:
-            client = self._http_clients.get_client()
-            response = await client.get(AUTH_URL, headers=headers)
+        max_retries = 3
 
-            if response.status_code != 200:
-                raise RuntimeError(
-                    f"匿名会话创建失败: HTTP {response.status_code} {response.text[:200]}"
+        for attempt in range(1, max_retries + 1):
+            try:
+                fe_version = await get_latest_fe_version()
+                headers = _build_dynamic_headers(fe_version)
+
+                client = self._http_clients.get_client()
+                response = await client.get(AUTH_URL, headers=headers)
+
+                if response.status_code != 200:
+                    raise RuntimeError(
+                        f"匿名会话创建失败: HTTP {response.status_code} {response.text[:200]}"
+                    )
+
+                data = response.json()
+                token = str(data.get("token") or "").strip()
+                if not token:
+                    raise RuntimeError(f"匿名会话创建失败: 未返回 token {data}")
+
+                # 优化：通过解密 token 内部值获取准确的 user_id 和 email
+                # Payload 结构通常为: {"id": "...", "email": "Guest-...@guest.com"}
+                payload = _decode_token_payload(token)
+
+                user_id = str(
+                    payload.get("id")
+                    or data.get("id")
+                    or data.get("user_id")
+                    or f"guest-{token[:12]}"
+                ).strip()
+
+                # 从 email 中提取用户名，例如 Guest-1773376198189
+                raw_email = (
+                    payload.get("email") or data.get("name") or data.get("email") or ""
                 )
+                username = str(raw_email).split("@")[0] or f"Guest-{user_id[:8]}"
 
-            data = response.json()
-            token = str(data.get("token") or "").strip()
-            if not token:
-                raise RuntimeError(f"匿名会话创建失败: 未返回 token {data}")
-
-            # 优化：通过解密 token 内部值获取准确的 user_id 和 email
-            # Payload 结构通常为: {"id": "...", "email": "Guest-...@guest.com"}
-            payload = _decode_token_payload(token)
-            
-            user_id = str(
-                payload.get("id") 
-                or data.get("id") 
-                or data.get("user_id") 
-                or f"guest-{token[:12]}"
-            ).strip()
-            
-            # 从 email 中提取用户名，例如 Guest-1773376198189
-            raw_email = payload.get("email") or data.get("name") or data.get("email") or ""
-            username = str(raw_email).split("@")[0] or f"Guest-{user_id[:8]}"
-
-            logger.debug(
-                "获取匿名会话成功: user_id=%s, username=%s", user_id, username
-            )
-            return GuestSession(
-                token=token,
-                user_id=user_id,
-                username=username,
-            )
-        except Exception as e:
-            logger.exception("❌ 匿名会话创建异常")
-            raise
+                logger.debug(
+                    "获取匿名会话成功: user_id=%s, username=%s", user_id, username
+                )
+                return GuestSession(
+                    token=token,
+                    user_id=user_id,
+                    username=username,
+                )
+            except Exception as exc:
+                if self._is_retryable_create_error(exc):
+                    logger.warning(
+                        "⚠️ 匿名会话创建网络异常 (%s/%s): [%s] %s",
+                        attempt,
+                        max_retries,
+                        type(exc).__name__,
+                        self._format_exception_message(exc),
+                    )
+                    if attempt < max_retries:
+                        await asyncio.sleep(min(2 ** (attempt - 1), 4))
+                        continue
+                else:
+                    logger.exception("❌ 匿名会话创建异常")
+                raise
 
     async def _delete_all_chats(self, session: GuestSession) -> bool:
         """删除匿名会话的全部对话，尽量释放并发占用。"""
@@ -239,7 +267,7 @@ class GuestSessionPool:
                             created += 1
                         elif isinstance(result, Exception):
                             exc_type = type(result).__name__
-                            exc_msg = str(result) or "(无详情)"
+                            exc_msg = self._format_exception_message(result)
                             errors.add(f"[{exc_type}] {exc_msg}")
 
                 if errors:
@@ -344,7 +372,7 @@ class GuestSessionPool:
                     created += 1
                 elif isinstance(result, Exception):
                     exc_type = type(result).__name__
-                    exc_msg = str(result) or "(无详情)"
+                    exc_msg = self._format_exception_message(result)
                     errors.add(f"[{exc_type}] {exc_msg}")
 
         if errors:

@@ -95,6 +95,7 @@ class SharedHttpClients:
                 ),
                 follow_redirects=self._follow_redirects,
                 proxy=get_proxy_config(),
+                trust_env=False,
             )
         return self._client
 
@@ -117,6 +118,7 @@ class SharedHttpClients:
                 ),
                 follow_redirects=self._follow_redirects,
                 proxy=get_proxy_config(),
+                trust_env=False,
             )
         return self._stream_client
 

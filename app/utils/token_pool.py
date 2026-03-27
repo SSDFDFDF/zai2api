@@ -126,7 +126,7 @@ class ZAITokenValidator:
             - error_message: 失败原因（仅在 is_valid=False 时有值）
         """
         try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
+            async with httpx.AsyncClient(timeout=15.0, trust_env=False) as client:
                 response = await client.get(
                     cls.AUTH_URL,
                     headers=cls.get_headers(token)

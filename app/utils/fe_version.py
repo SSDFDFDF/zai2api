@@ -99,7 +99,11 @@ async def get_latest_fe_version(force_refresh: bool = False) -> str:
             }
 
         try:
-            async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+            async with httpx.AsyncClient(
+                timeout=10.0,
+                follow_redirects=True,
+                trust_env=False,
+            ) as client:
                 response = await client.get(FE_VERSION_SOURCE_URL, headers=headers)
                 response.raise_for_status()
                 version = _extract_version(response.text)
