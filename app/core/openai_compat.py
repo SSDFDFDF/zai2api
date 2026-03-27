@@ -1,14 +1,23 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-"""OpenAI 兼容响应辅助函数。"""
+"""OpenAI 兼容响应辅助函数。
+
+提供：
+- OpenAI 格式的响应构建
+- 错误消息提取
+- 错误响应构建
+- HTTP 状态码映射
+"""
 
 import json
 import time
 from typing import Any, Dict, Optional
 
 from app.core.retry_policy import summarize_upstream_error_text
+from app.exceptions import AppError, UpstreamError, ValidationError
 from app.utils.logger import logger
+
 SYSTEM_FINGERPRINT = "fp_api_proxy_001"
 
 
@@ -125,36 +134,30 @@ def resolve_http_error_status(error_code: Any, error_type: Any) -> int:
 
 
 def handle_error(error: Exception, context: str = "") -> Dict[str, Any]:
-    """统一错误处理。"""
-    # 未知模型 → model_not_found（路由层据此返回 404）
+    """统一错误处理。
+
+    将异常转换为 OpenAI 兼容的错误响应格式。
+    注意：此函数主要用于向后兼容，新代码应直接抛出 AppError 子类。
+    """
+    # 如果已经是 AppError，直接返回其字典形式
+    if isinstance(error, AppError):
+        return error.to_dict()
+
+    # 未知模型 → model_not_found
     if isinstance(error, ValueError) and "不支持的模型" in str(error):
+        exc = ValidationError(str(error))
         logger.warning(str(error))
-        return {
-            "error": {
-                "message": str(error),
-                "type": "invalid_request_error",
-                "code": "model_not_found",
-            }
-        }
+        return exc.to_dict()
 
     if isinstance(error, ValueError):
+        exc = ValidationError(str(error))
         logger.warning("invalid request: %s", error)
-        return {
-            "error": {
-                "message": str(error),
-                "type": "invalid_request_error",
-                "code": "invalid_request_error",
-            }
-        }
+        return exc.to_dict()
 
+    # 其他异常 → UpstreamError
     friendly_msg = get_error_message(error)
     error_msg = f"上游{context}错误: {friendly_msg}" if context else f"上游错误: {friendly_msg}"
     logger.error("%s (raw: %s)", error_msg, error)
-    
-    return {
-        "error": {
-            "message": error_msg,
-            "type": "upstream_error",
-            "code": "internal_error",
-        }
-    }
+
+    exc = UpstreamError(message=error_msg)
+    return exc.to_dict()

@@ -16,6 +16,7 @@ from app.core import openai
 from app.core.config import settings
 from app.utils.logger import DEFAULT_LOG_DIR, setup_logger
 from app.utils.reload_config import get_uvicorn_reload_config
+from app.core.error_handler import register_exception_handlers
 
 # Setup logger
 logger = setup_logger(log_dir=DEFAULT_LOG_DIR, debug_mode=settings.DEBUG_LOGGING)
@@ -178,6 +179,9 @@ app = FastAPI(
     redoc_url=None,
     openapi_url=None,
 )
+
+# Register global exception handlers
+register_exception_handlers(app)
 
 cors_origins_str = os.getenv("CORS_ORIGINS", "")
 cors_origins = [o.strip() for o in cors_origins_str.split(",") if o.strip()]
