@@ -139,14 +139,22 @@ def handle_error(error: Exception, context: str = "") -> Dict[str, Any]:
     将异常转换为 OpenAI 兼容的错误响应格式。
     注意：此函数主要用于向后兼容，新代码应直接抛出 AppError 子类。
     """
+    from app.exceptions import ModelNotFoundError
+
     # 如果已经是 AppError，直接返回其字典形式
     if isinstance(error, AppError):
         return error.to_dict()
 
-    # 未知模型 → model_not_found
-    if isinstance(error, ValueError) and "不支持的模型" in str(error):
-        exc = ValidationError(str(error))
-        logger.warning(str(error))
+    # 未知模型 → ModelNotFoundError (404)
+    error_str = str(error)
+    if isinstance(error, ValueError) and ("Unsupported model" in error_str or "不支持的模型" in error_str):
+        # 从错误消息中提取模型名称
+        import re
+        # 匹配 "Unsupported model: xxx" 或 "不支持的模型: xxx"
+        match = re.search(r"(?:Unsupported model|不支持的模型)[:\s]*(\S+)", error_str)
+        model = match.group(1) if match else "unknown"
+        exc = ModelNotFoundError(model)
+        logger.warning(error_str)
         return exc.to_dict()
 
     if isinstance(error, ValueError):
