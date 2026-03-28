@@ -17,6 +17,8 @@ def mock_httpx_client():
         # Mock 成功响应 200
         mock_response = AsyncMock()
         mock_response.status_code = 200
+        mock_response.headers = {"content-length": "4"}
+        mock_response.content = b"true"
         mock_request.return_value = mock_response
         yield mock_request
 
@@ -91,6 +93,10 @@ async def test_run_chat_cleanup(tmp_path, monkeypatch, mock_httpx_client, mock_f
     
     # 验证 HTTP 调用次数等于被选中的 Token 数量
     assert mock_httpx_client.call_count == 2
+
+    call_kwargs = mock_httpx_client.call_args.kwargs
+    assert call_kwargs["method"] == "DELETE"
+    assert call_kwargs["url"] == "https://chat.z.ai/api/v1/chats/"
 
     # 验证数据库中上次清理时间是否已更新
     t1 = await dao.get_token_by_id(id1)

@@ -1,6 +1,7 @@
 """Background service for token chat cleanup."""
 
 import asyncio
+import time
 from dataclasses import dataclass
 from typing import Optional
 
@@ -19,6 +20,8 @@ class ChatCleanupSummary:
 async def delete_chats_for_token(
     token: str,
     clients: Optional[SharedHttpClients] = None,
+    *,
+    token_id: Optional[int] = None,
 ) -> bool:
     """Delete all chat sessions for a given token."""
     owns_clients = clients is None
@@ -32,6 +35,7 @@ async def delete_chats_for_token(
     headers["Origin"] = "https://chat.z.ai"
     headers["Referer"] = "https://chat.z.ai/"
     
+    started_at = time.perf_counter()
     try:
         response = await client.request(
             method="DELETE",
@@ -39,13 +43,28 @@ async def delete_chats_for_token(
             headers=headers,
             json=None
         )
+        elapsed_ms = (time.perf_counter() - started_at) * 1000
+        logger.debug(
+            "[token.chat_cleanup] token_id=%s status=%s bytes=%s elapsed_ms=%.1f",
+            token_id,
+            response.status_code,
+            response.headers.get("content-length") or len(response.content or b""),
+            elapsed_ms,
+        )
         if response.status_code == 200:
             return True
-        logger.warning(f"⚠️ 清理会话失败 (Token: {token[:15]}...): HTTP {response.status_code} {response.text}")
+        logger.warning(
+            "⚠️ 清理会话失败 (Token ID: %s, Token: %s...): HTTP %s %s",
+            token_id,
+            token[:15],
+            response.status_code,
+            response.text,
+        )
         return False
     except Exception as e:
         logger.warning(
-            "⚠️ 清理会话时发生错误 (Token: %s...)",
+            "⚠️ 清理会话时发生错误 (Token ID: %s, Token: %s...)",
+            token_id,
             token[:15],
             exc_info=True,
         )
@@ -60,14 +79,20 @@ async def run_chat_cleanup(
 ) -> ChatCleanupSummary:
     """Clean up chat sessions for tokens that haven't been cleaned in `interval_days`."""
     token_dao = dao or get_token_dao()
-    
+    started_at = time.perf_counter()
+
     # 获取需要清理的 Token (启用的 zai Token)
     tokens = await token_dao.get_tokens_needing_chat_cleanup("zai", interval_days)
     if not tokens:
         return ChatCleanupSummary()
-        
+
+    logger.info(
+        "[token.chat_cleanup.batch] start total_tokens=%s mode=serial interval_days=%s",
+        len(tokens),
+        interval_days,
+    )
     logger.info(f"🧹 开始执行周期会话清理，共有 {len(tokens)} 个 Token 到期需要清理")
-    
+
     success_count = 0
     failed_count = 0
     clients = SharedHttpClients()
@@ -76,7 +101,11 @@ async def run_chat_cleanup(
             token_id = int(token_record["id"])
             token_str = str(token_record["token"])
             
-            success = await delete_chats_for_token(token_str, clients=clients)
+            success = await delete_chats_for_token(
+                token_str,
+                clients=clients,
+                token_id=token_id,
+            )
             if success:
                 await token_dao.update_last_chat_cleanup(token_id)
                 success_count += 1
@@ -89,6 +118,15 @@ async def run_chat_cleanup(
             await asyncio.sleep(2.0)
     finally:
         await clients.close()
+
+    elapsed_ms = (time.perf_counter() - started_at) * 1000
+    logger.info(
+        "[token.chat_cleanup.batch] done total_tokens=%s success=%s failed=%s mode=serial elapsed_ms=%.1f",
+        len(tokens),
+        success_count,
+        failed_count,
+        elapsed_ms,
+    )
 
     return ChatCleanupSummary(
         total_checked=len(tokens),

@@ -646,6 +646,29 @@ def read_env_content(env_path: str | Path = ENV_PATH) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def get_config_source_snapshot(
+    *,
+    env_values: Mapping[str, str] | None = None,
+    db_values: Mapping[str, Any] | None = None,
+    keys: tuple[str, ...] = (),
+) -> dict[str, dict[str, Any]]:
+    snapshot: dict[str, dict[str, Any]] = {}
+    db_items = db_values or {}
+    source_env = env_values or {}
+
+    for key in keys:
+        field = CONFIG_FIELD_SPECS.get(key)
+        if field is None:
+            continue
+        snapshot[key] = {
+            "env": source_env.get(key, "<unset>"),
+            "db": db_items.get(key, "<unset>"),
+            "db_persist": field.db_persist,
+        }
+
+    return snapshot
+
+
 def validate_env_source(content: str) -> str:
     normalized = content.replace("\r\n", "\n").replace("\r", "\n")
 

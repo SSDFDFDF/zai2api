@@ -1,14 +1,17 @@
 from types import SimpleNamespace
 from urllib.parse import urlencode
+from unittest.mock import AsyncMock
 
 import pytest
 from jinja2 import Environment, FileSystemLoader
 from starlette.requests import Request
 
 from app.admin import api as admin_api
+from app.core.config import settings
 from app.admin.config_manager import (
     CONFIG_FIELD_SPECS,
     build_config_page_data,
+    get_config_source_snapshot,
     save_form_config,
     save_source_config,
     validate_env_source,
@@ -98,7 +101,7 @@ async def test_build_config_page_data_includes_sections_and_override_status(
 
     assert field_map["API_ENDPOINT"]["source_label"] == ".env"
     assert field_map["DEBUG_LOGGING"]["source_label"] == ".env"
-    assert field_map["GLM5_MODEL"]["source_label"] == "默认值"
+    assert field_map["MODEL_BLACKLIST"]["source_label"] == "默认值"
     assert field_map["ADMIN_PASSWORD"]["sensitive"] is True
 
 
@@ -193,6 +196,8 @@ async def test_save_config_endpoint_returns_refresh_trigger(tmp_path, monkeypatc
     assert "SERVICE_NAME=after" in (tmp_path / ".env").read_text(encoding="utf-8")
 
 
+
+
 @pytest.mark.asyncio
 async def test_save_config_source_endpoint_rejects_invalid_source(
     tmp_path,
@@ -221,6 +226,20 @@ async def test_save_config_source_endpoint_rejects_invalid_source(
 def test_validate_env_source_rejects_invalid_lines():
     with pytest.raises(ValueError, match="KEY=VALUE"):
         validate_env_source("SERVICE_NAME=ok\nbad line\n")
+
+
+def test_get_config_source_snapshot_reports_env_and_db_values():
+    snapshot = get_config_source_snapshot(
+        env_values={"ANONYMOUS_MODE": "false"},
+        db_values={"ANONYMOUS_MODE": True},
+        keys=("ANONYMOUS_MODE", "MODEL_AUTO_REFRESH_HOURS"),
+    )
+
+    assert snapshot["ANONYMOUS_MODE"]["env"] == "false"
+    assert snapshot["ANONYMOUS_MODE"]["db"] is True
+    assert snapshot["ANONYMOUS_MODE"]["db_persist"] is True
+    assert snapshot["MODEL_AUTO_REFRESH_HOURS"]["env"] == "<unset>"
+    assert snapshot["MODEL_AUTO_REFRESH_HOURS"]["db"] == "<unset>"
 
 
 def test_config_template_compiles():

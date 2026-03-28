@@ -208,6 +208,14 @@ class TokenAutomationScheduler:
                         int(settings.TOKEN_AUTO_MAINTENANCE_INTERVAL),
                         30,
                     )
+                    logger.debug(
+                        "[token.auto_maintenance] cycle enabled=%s interval=%s remove_duplicates=%s health_check=%s delete_invalid=%s",
+                        settings.TOKEN_AUTO_MAINTENANCE_ENABLED,
+                        wait_seconds,
+                        settings.TOKEN_AUTO_REMOVE_DUPLICATES,
+                        settings.TOKEN_AUTO_HEALTH_CHECK,
+                        settings.TOKEN_AUTO_DELETE_INVALID,
+                    )
                     if not self._has_enabled_maintenance_action():
                         self._log_maintenance_warning_once(
                             "已启用自动维护，但未选择任何维护动作"
@@ -246,6 +254,11 @@ class TokenAutomationScheduler:
                 if getattr(settings, "CHAT_CLEANUP_ENABLED", True):
                     from app.core.chat_cleanup import run_chat_cleanup
                     interval_days = getattr(settings, "CHAT_CLEANUP_INTERVAL_DAYS", 7)
+                    logger.debug(
+                        "[token.auto_chat_cleanup] cycle enabled=%s interval_days=%s",
+                        getattr(settings, "CHAT_CLEANUP_ENABLED", True),
+                        interval_days,
+                    )
                     
                     summary = await run_chat_cleanup(interval_days=interval_days)
                     if summary.total_checked > 0:

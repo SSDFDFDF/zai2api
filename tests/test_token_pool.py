@@ -1,5 +1,9 @@
 import pytest
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
+from app.core.retry_policy import RetryPolicy
+from app.core.config import settings
 from app.services import token_dao as token_dao_module
 from app.utils import token_pool as token_pool_module
 from app.utils.token_pool import TokenPool
@@ -75,3 +79,24 @@ async def test_token_pool_sync_from_database_rebuilds_user_order(monkeypatch):
 
     assert await pool.get_next_token() == "token-b"
     assert await pool.get_next_token() == "token-a"
+
+
+@pytest.mark.asyncio
+async def test_retry_policy_ignores_guest_pool_when_anonymous_disabled(monkeypatch):
+    policy = RetryPolicy()
+    release_mock = AsyncMock()
+    report_mock = AsyncMock()
+
+    monkeypatch.setattr(settings, "ANONYMOUS_MODE", False)
+    monkeypatch.setattr(
+        "app.core.retry_policy.get_guest_session_pool",
+        lambda: SimpleNamespace(release=release_mock, report_failure=report_mock),
+    )
+
+    transformed = {"auth_mode": "guest", "guest_user_id": "guest-1"}
+    await policy.release_guest_session(transformed)
+    await policy.report_guest_session_failure(transformed)
+
+    release_mock.assert_not_awaited()
+    report_mock.assert_not_awaited()
+    assert policy.should_retry_guest_session(401, False, 0, 2, transformed) is False

@@ -22,6 +22,12 @@ from app.core.error_handler import register_exception_handlers
 logger = setup_logger(log_dir=DEFAULT_LOG_DIR, debug_mode=settings.DEBUG_LOGGING)
 
 
+def _stringify_bool_env(value: str | None) -> str:
+    if value is None:
+        return "<unset>"
+    return value
+
+
 async def warmup_upstream_client():
     """可选预热上游适配器，提前初始化动态依赖。"""
     try:
@@ -53,16 +59,52 @@ async def lifespan(app: FastAPI):
     from app.database import init_db
     await init_db()
 
+    from dotenv import dotenv_values
+
     from app.services.token_automation import (
         run_directory_import,
         start_token_automation_scheduler,
         stop_token_automation_scheduler,
     )
-    from app.admin.config_manager import apply_db_overrides
+    from app.admin.config_manager import (
+        ENV_PATH,
+        apply_db_overrides,
+        get_config_source_snapshot,
+        load_db_overrides,
+    )
+
+    env_values = dotenv_values(ENV_PATH) if ENV_PATH.exists() else {}
+    env_anonymous_mode = _stringify_bool_env(os.getenv("ANONYMOUS_MODE"))
+    db_overrides = await load_db_overrides()
+    config_sources = get_config_source_snapshot(
+        env_values=env_values,
+        db_values=db_overrides,
+        keys=(
+            "ANONYMOUS_MODE",
+            "TOKEN_AUTO_IMPORT_ENABLED",
+            "TOKEN_AUTO_MAINTENANCE_ENABLED",
+            "MODEL_AUTO_REFRESH_HOURS",
+        ),
+    )
 
     # 加载数据库配置覆盖
     await apply_db_overrides(settings)
     setup_logger(log_dir=DEFAULT_LOG_DIR, debug_mode=settings.DEBUG_LOGGING)
+    logger.info(
+        "[config.startup] ANONYMOUS_MODE env=%s db=%s effective=%s TOKEN_AUTO_IMPORT_ENABLED env=%s db=%s effective=%s TOKEN_AUTO_MAINTENANCE_ENABLED env=%s db=%s effective=%s MODEL_AUTO_REFRESH_HOURS env=%s db=%s effective=%s",
+        env_anonymous_mode,
+        config_sources.get("ANONYMOUS_MODE", {}).get("db", "<unset>"),
+        settings.ANONYMOUS_MODE,
+        config_sources.get("TOKEN_AUTO_IMPORT_ENABLED", {}).get("env", "<unset>"),
+        config_sources.get("TOKEN_AUTO_IMPORT_ENABLED", {}).get("db", "<unset>"),
+        settings.TOKEN_AUTO_IMPORT_ENABLED,
+        config_sources.get("TOKEN_AUTO_MAINTENANCE_ENABLED", {}).get("env", "<unset>"),
+        config_sources.get("TOKEN_AUTO_MAINTENANCE_ENABLED", {}).get("db", "<unset>"),
+        settings.TOKEN_AUTO_MAINTENANCE_ENABLED,
+        config_sources.get("MODEL_AUTO_REFRESH_HOURS", {}).get("env", "<unset>"),
+        config_sources.get("MODEL_AUTO_REFRESH_HOURS", {}).get("db", "<unset>"),
+        settings.MODEL_AUTO_REFRESH_HOURS,
+    )
 
     if settings.TOKEN_AUTO_IMPORT_ENABLED and settings.TOKEN_AUTO_IMPORT_SOURCE_DIR.strip():
         try:
@@ -88,6 +130,14 @@ async def lifespan(app: FastAPI):
     if settings.ANONYMOUS_MODE:
         from app.utils.guest_session_pool import initialize_guest_session_pool
 
+        logger.info(
+            "[guest_session.startup] enabling guest pool because ANONYMOUS_MODE effective=%s env=%s db=%s pool_size=%s maintenance_interval=%s",
+            settings.ANONYMOUS_MODE,
+            config_sources.get("ANONYMOUS_MODE", {}).get("env", env_anonymous_mode),
+            config_sources.get("ANONYMOUS_MODE", {}).get("db", "<unset>"),
+            settings.GUEST_POOL_SIZE,
+            settings.GUEST_POOL_MAINTENANCE_INTERVAL,
+        )
         guest_pool = await initialize_guest_session_pool(
             pool_size=settings.GUEST_POOL_SIZE,
             session_max_age=settings.GUEST_SESSION_MAX_AGE,
@@ -97,6 +147,13 @@ async def lifespan(app: FastAPI):
         logger.info(
             "🫥 匿名会话池已就绪: "
             f"{guest_status.get('valid_sessions', 0)} 个可用会话"
+        )
+    else:
+        logger.info(
+            "[guest_session.startup] guest pool disabled because ANONYMOUS_MODE effective=%s env=%s db=%s",
+            settings.ANONYMOUS_MODE,
+            config_sources.get("ANONYMOUS_MODE", {}).get("env", env_anonymous_mode),
+            config_sources.get("ANONYMOUS_MODE", {}).get("db", "<unset>"),
         )
 
     await warmup_upstream_client()

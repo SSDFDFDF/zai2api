@@ -18,6 +18,7 @@ from app.core.headers import build_dynamic_headers as _build_dynamic_headers
 from app.core.httpx_errors import normalize_httpx_exception, normalize_httpx_response
 from app.utils.fe_version import get_latest_fe_version
 from app.utils.logger import logger
+from app.utils.utlis import mask_token
 
 
 AUTH_URL = "https://chat.z.ai/api/v1/auths/"
@@ -77,6 +78,9 @@ class GuestSessionPool:
         self._sessions: Dict[str, GuestSession] = {}
         self._maintenance_task: Optional[asyncio.Task] = None
         self._capacity_lock = asyncio.Lock()
+        self._create_rate_lock = asyncio.Lock()
+        self._next_create_allowed_at = 0.0
+        self._create_min_interval = 1.0
         self._http_clients = SharedHttpClients(follow_redirects=True)
         self._background_tasks: Set[asyncio.Task] = set()
         self._cleanup_parallelism = max(1, settings.GUEST_CLEANUP_PARALLELISM)
@@ -125,15 +129,29 @@ class GuestSessionPool:
 
         await asyncio.gather(*(_cleanup(session) for session in sessions))
 
-    async def _create_session(self) -> GuestSession:
+    async def _wait_create_slot(self, reason: str) -> None:
+        async with self._create_rate_lock:
+            now = time.time()
+            wait_seconds = max(0.0, self._next_create_allowed_at - now)
+            if wait_seconds > 0:
+                logger.debug(
+                    "[guest_session.create] throttled reason=%s wait_seconds=%.2f",
+                    reason,
+                    wait_seconds,
+                )
+                await asyncio.sleep(wait_seconds)
+            self._next_create_allowed_at = time.time() + self._create_min_interval
+
+    async def _create_session(self, reason: str = "unspecified") -> GuestSession:
         """创建一个新的匿名访客会话。
-        
+
         从上游获取真实 token，并解密其内部值作为 session 元数据。
         """
         max_retries = 3
 
         for attempt in range(1, max_retries + 1):
             try:
+                await self._wait_create_slot(reason)
                 fe_version = await get_latest_fe_version()
                 headers = _build_dynamic_headers(fe_version)
 
@@ -149,6 +167,15 @@ class GuestSessionPool:
                 token = str(data.get("token") or "").strip()
                 if not token:
                     raise RuntimeError(f"匿名会话创建失败: 未返回 token {data}")
+
+                logger.debug(
+                    "[guest_session.create] reason=%s attempt=%s status=%s bytes=%s token=%s",
+                    reason,
+                    attempt,
+                    response.status_code,
+                    response.headers.get("content-length") or len(response.content or b""),
+                    mask_token(token),
+                )
 
                 # 优化：通过解密 token 内部值获取准确的 user_id 和 email
                 # Payload 结构通常为: {"id": "...", "email": "Guest-...@guest.com"}
@@ -168,7 +195,7 @@ class GuestSessionPool:
                 username = str(raw_email).split("@")[0] or f"Guest-{user_id[:8]}"
 
                 logger.debug(
-                    "获取匿名会话成功: user_id=%s, username=%s", user_id, username
+                    "获取匿名会话成功: user_id=%s, username=%s, reason=%s", user_id, username, reason
                 )
                 return GuestSession(
                     token=token,
@@ -263,16 +290,26 @@ class GuestSessionPool:
                 if need <= 0:
                     return True
 
+                logger.debug(
+                    "[guest_session.ensure_capacity] valid_sessions=%s pool_size=%s need=%s",
+                    len(valid_sessions),
+                    self.pool_size,
+                    need,
+                )
                 results = await asyncio.gather(
-                    *[self._create_session() for _ in range(need)],
+                    *[self._create_session(reason="capacity_refill") for _ in range(need)],
                     return_exceptions=True,
                 )
 
                 created = 0
+                duplicate_user_ids: set[str] = set()
                 errors = set()
                 with self._lock:
                     for result in results:
                         if isinstance(result, GuestSession):
+                            if result.user_id in self._sessions:
+                                duplicate_user_ids.add(result.user_id)
+                                continue
                             self._sessions[result.user_id] = result
                             created += 1
                         elif isinstance(result, Exception):
@@ -292,8 +329,28 @@ class GuestSessionPool:
                         need,
                         ", ".join(sorted(errors)),
                     )
+                if duplicate_user_ids:
+                    self._next_create_allowed_at = max(
+                        self._next_create_allowed_at,
+                        time.time() + self.maintenance_interval,
+                    )
+                    logger.warning(
+                        "⚠️ 匿名会话池补齐遇到重复 guest user_id，停止继续补池并冷却: duplicates=%s current_sessions=%s cooldown_seconds=%s",
+                        ", ".join(sorted(duplicate_user_ids)),
+                        len(self._sessions),
+                        self.maintenance_interval,
+                    )
 
-                if created == 0:
+                logger.debug(
+                    "[guest_session.ensure_capacity] refill_result created=%s requested=%s duplicates=%s errors=%s total_sessions=%s",
+                    created,
+                    need,
+                    len(duplicate_user_ids),
+                    len(errors),
+                    len(self._sessions),
+                )
+
+                if created == 0 or duplicate_user_ids:
                     return False
 
     async def _maintenance_loop(self):
@@ -345,6 +402,10 @@ class GuestSessionPool:
                 success = await self._ensure_capacity()
                 if success is False:
                     consecutive_failures += 1
+                    logger.debug(
+                        "[guest_session.maintenance] ensure_capacity_failed consecutive_failures=%s",
+                        consecutive_failures,
+                    )
                     if consecutive_failures >= self.max_failures:
                         logger.warning(
                             f"⚠️ 匿名会话池补齐连续失败 {consecutive_failures} 次达到限值，"
@@ -378,8 +439,14 @@ class GuestSessionPool:
         if self._maintenance_task:
             return
 
+        logger.debug(
+            "[guest_session.initialize] start pool_size=%s maintenance_interval=%s session_max_age=%s",
+            self.pool_size,
+            self.maintenance_interval,
+            self.session_max_age,
+        )
         results = await asyncio.gather(
-            *[self._create_session() for _ in range(self.pool_size)],
+            *[self._create_session(reason="startup_initialize") for _ in range(self.pool_size)],
             return_exceptions=True,
         )
 
@@ -410,7 +477,7 @@ class GuestSessionPool:
 
         if created == 0:
             try:
-                fallback = await self._create_session()
+                fallback = await self._create_session(reason="startup_fallback")
                 with self._lock:
                     self._sessions[fallback.user_id] = fallback
                 created = 1
@@ -468,6 +535,12 @@ class GuestSessionPool:
                     current = self._sessions.get(session.user_id)
                     if current and current.valid and current.user_id not in excluded:
                         current.active_requests += 1
+                        logger.debug(
+                            "[guest_session.acquire] reuse user_id=%s active_requests=%s valid_sessions=%s",
+                            current.user_id,
+                            current.active_requests,
+                            len(candidates),
+                        )
                         return current
 
             with self._lock:
@@ -477,7 +550,12 @@ class GuestSessionPool:
                     f"匿名会话池容量超限: current={current_size}, max={max_sessions}"
                 )
 
-            new_session = await self._create_session()
+            logger.debug(
+                "[guest_session.acquire] no reusable session, creating fallback current_size=%s excluded=%s",
+                current_size,
+                len(excluded),
+            )
+            new_session = await self._create_session(reason="acquire_fallback")
             if new_session.user_id in excluded:
                 await self._delete_all_chats(new_session)
                 continue
@@ -503,6 +581,11 @@ class GuestSessionPool:
             session = self._sessions.get(user_id)
             if session:
                 session.active_requests = max(0, session.active_requests - 1)
+                logger.debug(
+                    "[guest_session.release] user_id=%s active_requests=%s",
+                    user_id,
+                    session.active_requests,
+                )
 
     async def report_failure(self, user_id: Optional[str] = None):
         """标记匿名会话失效，并尝试补一个新会话。"""
@@ -521,6 +604,11 @@ class GuestSessionPool:
             self._track_background_task(self._delete_all_chats(session))
             logger.debug("已淘汰匿名会话: %s", session.user_id)
 
+        logger.debug(
+            "[guest_session.report_failure] user_id=%s triggering_capacity_refill=%s",
+            user_id,
+            session is not None,
+        )
         await self._ensure_capacity()
 
     async def refresh_auth(self, failed_user_id: Optional[str] = None):
@@ -576,6 +664,9 @@ async def initialize_guest_session_pool(
 ) -> GuestSessionPool:
     """初始化全局匿名会话池。"""
     global _guest_session_pool
+
+    if not settings.ANONYMOUS_MODE:
+        raise RuntimeError("ANONYMOUS_MODE is disabled")
 
     with _guest_pool_lock:
         if _guest_session_pool is None:

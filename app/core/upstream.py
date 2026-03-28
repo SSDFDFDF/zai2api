@@ -927,6 +927,10 @@ class UpstreamClient:
 
             return await self._fetch_direct_guest_auth()
 
+        self.logger.info(
+            "[guest_session.disabled] ANONYMOUS_MODE=false, skip guest pool and direct guest auth fallback"
+        )
+
         self.logger.error("❌ 无法获取有效的上游令牌")
         return {
             "token": "",

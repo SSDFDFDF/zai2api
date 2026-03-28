@@ -21,6 +21,7 @@ import httpx
 
 from app.core.httpx_errors import normalize_httpx_exception
 from app.utils.logger import logger
+from app.utils.utlis import mask_token
 
 
 # ==================== Token 状态管理 ====================
@@ -93,6 +94,13 @@ class ZAITokenValidator:
     AUTH_URL = "https://chat.z.ai/api/v1/auths/"
 
     @staticmethod
+    def _response_size_bytes(response: httpx.Response) -> int:
+        content_length = response.headers.get("content-length")
+        if content_length and content_length.isdigit():
+            return int(content_length)
+        return len(response.content or b"")
+
+    @staticmethod
     def get_headers(token: str) -> Dict[str, str]:
         """构建认证请求头"""
         return {
@@ -126,11 +134,22 @@ class ZAITokenValidator:
             - is_valid: True 表示是有效的认证用户 Token
             - error_message: 失败原因（仅在 is_valid=False 时有值）
         """
+        started_at = time.perf_counter()
+        masked_token = mask_token(token)
         try:
             async with httpx.AsyncClient(timeout=15.0, trust_env=False) as client:
                 response = await client.get(
                     cls.AUTH_URL,
                     headers=cls.get_headers(token)
+                )
+
+                elapsed_ms = (time.perf_counter() - started_at) * 1000
+                logger.debug(
+                    "[token.validate] token=%s status=%s bytes=%s elapsed_ms=%.1f",
+                    masked_token,
+                    response.status_code,
+                    cls._response_size_bytes(response),
+                    elapsed_ms,
                 )
 
                 # 解析响应
@@ -512,10 +531,16 @@ class TokenPool:
             return
 
         total_tokens = len(self.token_statuses)
-        logger.debug("开始 Token 池健康检查... (共 %s 个 Token)", total_tokens)
+        concurrency = 10
+        started_at = time.perf_counter()
+        logger.info(
+            "[token.health_check] start total_tokens=%s mode=concurrency concurrency=%s",
+            total_tokens,
+            concurrency,
+        )
 
         # 并发执行所有 Token 的健康检查
-        semaphore = asyncio.Semaphore(10)
+        semaphore = asyncio.Semaphore(concurrency)
 
         async def _check_with_limit(token: str):
             async with semaphore:
@@ -534,6 +559,17 @@ class TokenPool:
         exception_count = sum(1 for r in results if isinstance(r, Exception))
 
         health_rate = (healthy_count / total_tokens) * 100 if total_tokens > 0 else 0
+
+        elapsed_ms = (time.perf_counter() - started_at) * 1000
+        logger.info(
+            "[token.health_check] done total_tokens=%s healthy=%s failed=%s exceptions=%s mode=concurrency concurrency=%s elapsed_ms=%.1f",
+            total_tokens,
+            healthy_count,
+            failed_count,
+            exception_count,
+            concurrency,
+            elapsed_ms,
+        )
 
         if healthy_count == 0 and total_tokens > 0:
             logger.warning(f"⚠️ 健康检查完成: 0/{total_tokens} 个 Token 健康 - 请检查 Token 配置")

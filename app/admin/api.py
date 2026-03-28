@@ -131,6 +131,7 @@ async def reload_settings():
     from dotenv import load_dotenv
 
     from app.core.config import settings
+    from app.utils.guest_session_pool import close_guest_session_pool, get_guest_session_pool
     from app.utils.logger import setup_logger
 
     # 重新加载 .env 文件
@@ -150,6 +151,10 @@ async def reload_settings():
 
     # 重新初始化 logger（使用新的 DEBUG_LOGGING 配置）
     setup_logger(log_dir=DEFAULT_LOG_DIR, debug_mode=settings.DEBUG_LOGGING)
+
+    if not settings.ANONYMOUS_MODE and get_guest_session_pool() is not None:
+        logger.info("[guest_session.reload] ANONYMOUS_MODE=false, closing existing guest session pool")
+        await close_guest_session_pool()
 
     logger.info(f"🔄 配置已热重载 (DEBUG_LOGGING={settings.DEBUG_LOGGING})")
 

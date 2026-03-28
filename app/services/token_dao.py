@@ -3,6 +3,7 @@ Token 数据访问层 (DAO) - SQLAlchemy 版
 提供 Token 的 CRUD 操作和查询功能
 """
 import os
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import delete, func, select, update
@@ -537,6 +538,12 @@ class TokenDAO:
                     "checked": 0, "valid": 0, "guest": 0, "invalid": 0, "invalid_token_ids": [],
                 }
 
+            started_at = time.perf_counter()
+            logger.info(
+                "[token.validate.batch] start provider=%s total_tokens=%s mode=serial",
+                provider,
+                len(tokens),
+            )
             logger.info(f"🔍 开始批量验证 {len(tokens)} 个 {provider} Token...")
 
             from app.utils.token_pool import ZAITokenValidator
@@ -563,6 +570,16 @@ class TokenDAO:
                     if error_msg:
                         logger.warning("Token 验证失败: id=%s, type=%s, error=%s", token_id, token_type, error_msg)
 
+            elapsed_ms = (time.perf_counter() - started_at) * 1000
+            logger.info(
+                "[token.validate.batch] done provider=%s total_tokens=%s valid=%s guest=%s invalid=%s mode=serial elapsed_ms=%.1f",
+                provider,
+                stats["checked"],
+                stats["valid"],
+                stats["guest"],
+                stats["invalid"],
+                elapsed_ms,
+            )
             logger.info("批量验证完成: 有效 %s, 匿名 %s, 无效 %s", stats["valid"], stats["guest"], stats["invalid"])
             return stats
 

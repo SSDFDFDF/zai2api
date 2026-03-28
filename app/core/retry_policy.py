@@ -238,7 +238,8 @@ class RetryPolicy:
     ) -> bool:
         """判断匿名号池是否需要刷新会话后重试。"""
         return (
-            self.is_guest_auth(transformed)
+            settings.ANONYMOUS_MODE
+            and self.is_guest_auth(transformed)
             and (status_code == 401 or is_concurrency_limited_flag)
             and attempt + 1 < max_attempts
         )
@@ -262,7 +263,7 @@ class RetryPolicy:
 
     async def release_guest_session(self, transformed: Dict[str, Any]) -> None:
         """释放当前匿名会话占用。"""
-        if not self.is_guest_auth(transformed):
+        if not self.is_guest_auth(transformed) or not settings.ANONYMOUS_MODE:
             return
 
         guest_pool = get_guest_session_pool()
@@ -279,7 +280,7 @@ class RetryPolicy:
         is_concurrency_limited_flag: bool = False,
     ) -> None:
         """上报匿名会话失败并补齐新会话。"""
-        if not self.is_guest_auth(transformed):
+        if not self.is_guest_auth(transformed) or not settings.ANONYMOUS_MODE:
             return
 
         guest_pool = get_guest_session_pool()
