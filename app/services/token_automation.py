@@ -10,7 +10,7 @@ from app.core.config import settings
 from app.services.request_log_dao import get_request_log_dao
 from app.services.token_dao import TokenDAO, get_token_dao
 from app.services.token_importer import TokenImportSummary, import_tokens_from_directory
-from app.utils.logger import logger
+from app.utils.logger import logger, log_exception
 from app.utils.token_pool import TokenPool, get_token_pool
 
 DEFAULT_TOKEN_PROVIDER = "zai"
@@ -195,7 +195,7 @@ class TokenAutomationScheduler:
             except (FileNotFoundError, NotADirectoryError) as exc:
                 self._log_import_warning_once(str(exc))
             except Exception as exc:
-                logger.exception("❌ 自动导入 Token 失败")
+                log_exception(logger, "❌ 自动导入 Token 失败")
 
             await self._wait_or_stop(wait_seconds)
 
@@ -242,7 +242,7 @@ class TokenAutomationScheduler:
             except RuntimeError as exc:
                 logger.debug("跳过本轮自动维护: %s", exc)
             except Exception as exc:
-                logger.exception("❌ Token 自动维护失败")
+                log_exception(logger, "❌ Token 自动维护失败")
 
             await self._wait_or_stop(wait_seconds)
 
@@ -271,7 +271,7 @@ class TokenAutomationScheduler:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                logger.exception("❌ 定期会话清理失败")
+                log_exception(logger, "❌ 定期会话清理失败")
                 wait_seconds = 3600  # 执行出错的话，过 1 小时再重试
             
             await self._wait_or_stop(wait_seconds)
@@ -303,7 +303,7 @@ class TokenAutomationScheduler:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                logger.exception("❌ 定期请求日志清理失败")
+                log_exception(logger, "❌ 定期请求日志清理失败")
                 wait_seconds = 3600  # 执行出错的话，过 1 小时再重试
 
             await self._wait_or_stop(wait_seconds)

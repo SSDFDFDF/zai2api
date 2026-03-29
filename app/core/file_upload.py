@@ -17,7 +17,7 @@ from urllib.parse import quote
 import httpx
 
 from app.core.httpx_errors import normalize_httpx_exception, normalize_httpx_response
-from app.utils.logger import logger
+from app.utils.logger import logger, log_exception
 from app.core.config import settings
 
 
@@ -164,7 +164,8 @@ async def upload_file(
         }
 
     except Exception as e:
-        logger.exception(
+        log_exception(
+            logger,
             "❌ 文件上传异常: %s",
             normalize_httpx_exception(
                 e,
@@ -172,5 +173,6 @@ async def upload_file(
                 url=upload_url,
                 context="file_upload",
             ),
+            append_error=False,
         )
         return None

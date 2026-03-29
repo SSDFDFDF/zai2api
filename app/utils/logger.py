@@ -4,7 +4,9 @@
 import logging
 import sys
 from logging.handlers import RotatingFileHandler
+
 from pathlib import Path
+from typing import Any
 
 LOGGER_NAME = "zai2api"
 LEGACY_STDERR_HANDLER_NAME = "zai2api.stderr"
@@ -28,6 +30,57 @@ NOISY_LOGGER_LEVELS = {
 }
 
 logger = logging.getLogger(LOGGER_NAME)
+
+
+def _render_log_message(message: str, args: tuple[Any, ...]) -> str:
+    if not args:
+        return message
+
+    formatter_args: Any = args
+    if len(args) == 1 and isinstance(args[0], dict):
+        formatter_args = args[0]
+
+    try:
+        return message % formatter_args
+    except Exception:
+        rendered_args = " ".join(str(arg) for arg in args)
+        return f"{message} {rendered_args}".strip()
+
+
+def log_exception(
+    target_logger: logging.Logger,
+    message: str,
+    *args: Any,
+    error: BaseException | None = None,
+    append_error: bool = True,
+    **kwargs: Any,
+) -> None:
+    """Log exceptions with traceback only in debug mode."""
+    from app.core.config import settings
+
+    current_error = error if error is not None else sys.exc_info()[1]
+    if settings.DEBUG_LOGGING:
+        if current_error is not None:
+            kwargs["exc_info"] = (
+                type(current_error),
+                current_error,
+                current_error.__traceback__,
+            )
+        else:
+            kwargs["exc_info"] = True
+        target_logger.error(message, *args, **kwargs)
+        return
+
+    if current_error is None or not append_error:
+        target_logger.error(message, *args, **kwargs)
+        return
+
+    target_logger.error(
+        "%s: %s",
+        _render_log_message(message, args),
+        str(current_error).strip() or repr(current_error),
+        **kwargs,
+    )
 
 
 def resolve_log_file_path(

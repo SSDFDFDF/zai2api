@@ -5,6 +5,7 @@ import time
 from dataclasses import dataclass
 from typing import Optional
 
+from app.core.config import settings
 from app.core.headers import build_dynamic_headers
 from app.core.http_client import SharedHttpClients
 from app.services.token_dao import TokenDAO, get_token_dao
@@ -66,7 +67,7 @@ async def delete_chats_for_token(
             "⚠️ 清理会话时发生错误 (Token ID: %s, Token: %s...)",
             token_id,
             token[:15],
-            exc_info=True,
+            exc_info=settings.DEBUG_LOGGING,
         )
         return False
     finally:

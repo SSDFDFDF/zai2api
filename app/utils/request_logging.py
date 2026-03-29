@@ -11,7 +11,7 @@ from typing import Any, AsyncGenerator, Dict, Optional, Tuple
 
 from app.services.request_log_dao import get_request_log_dao
 from app.utils.format import format_compact_number
-from app.utils.logger import logger
+from app.utils.logger import logger, log_exception
 from app.utils.request_source import RequestSourceInfo
 from app.utils.utlis import mask_token
 
@@ -228,7 +228,7 @@ async def write_request_log(
             error_message=error_message,
         )
     except Exception as exc:
-        logger.exception("Failed to write request log")
+        log_exception(logger, "Failed to write request log")
 
 
 def _openai_payload_has_output(payload: Dict[str, Any]) -> bool:

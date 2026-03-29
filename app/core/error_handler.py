@@ -21,7 +21,7 @@ from fastapi.exceptions import HTTPException, RequestValidationError
 from fastapi.responses import JSONResponse
 
 from app.exceptions import AppError
-from app.utils.logger import logger
+from app.utils.logger import logger, log_exception
 
 
 # -----------------------------------------------------------------------
@@ -161,11 +161,13 @@ async def generic_error_handler(request: Request, exc: Exception) -> JSONRespons
 
     记录完整堆栈，返回通用错误响应。
     """
-    logger.exception(
+    log_exception(
+        logger,
         "Unhandled exception: %s (path=%s, method=%s)",
         type(exc).__name__,
         request.url.path,
         request.method,
+        error=exc,
     )
 
     return JSONResponse(

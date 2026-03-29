@@ -102,7 +102,7 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
 
 async def init_db():
     """初始化数据库表"""
-    from app.utils.logger import logger
+    from app.utils.logger import logger, log_exception
     
     # 确保 engine 已被当前 Worker 进程创建
     get_session_maker()
@@ -127,7 +127,7 @@ async def init_db():
             await conn.run_sync(run_upgrade)
             logger.debug("迁移成功")
         except Exception as e:
-            logger.exception("自动迁移过程中出错")
+            log_exception(logger, "自动迁移过程中出错")
 
 async def close_db():
     """关闭数据库连接"""

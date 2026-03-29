@@ -21,7 +21,7 @@ from typing import Optional
 import httpx
 
 from app.core.httpx_errors import normalize_httpx_exception
-from app.utils.logger import logger
+from app.utils.logger import logger, log_exception
 from app.utils.user_agent import get_random_user_agent
 
 # Base URL to probe for the version string.
@@ -118,7 +118,8 @@ async def get_latest_fe_version(force_refresh: bool = False) -> str:
                 logger.error("[Z.AI] Unable to locate X-FE-Version in landing page")
                 raise Exception("Unable to locate X-FE-Version in landing page")
         except Exception as exc:
-            logger.exception(
+            log_exception(
+                logger,
                 "%s",
                 normalize_httpx_exception(
                     exc,
@@ -126,6 +127,7 @@ async def get_latest_fe_version(force_refresh: bool = False) -> str:
                     url=FE_VERSION_SOURCE_URL,
                     context="fe_version.fetch",
                 ),
+                append_error=False,
             )
             if _cached_version:
                 return _cached_version

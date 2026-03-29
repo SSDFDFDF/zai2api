@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional
 
 from app.core.session.session_fingerprint import SessionFingerprint
 from app.core.session.session_store import SessionStore
+from app.core.config import settings
 from app.utils.logger import logger
 
 
@@ -423,4 +424,4 @@ class SessionManager:
             except asyncio.CancelledError:
                 break
             except Exception as exc:
-                logger.warning("会话清理异常", exc_info=True)
+                logger.warning("会话清理异常", exc_info=settings.DEBUG_LOGGING)

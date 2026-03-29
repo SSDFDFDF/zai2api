@@ -264,7 +264,10 @@ class UpstreamClient:
 
             self.logger.warning("未知会话提交动作: %s", action)
         except Exception as exc:
-            self.logger.warning("提交会话状态失败", exc_info=True)
+            self.logger.warning(
+                "提交会话状态失败",
+                exc_info=settings.DEBUG_LOGGING,
+            )
 
     # ------------------------------------------------------------------
     # 错误解析（委托到 retry_policy 工具函数）
@@ -416,7 +419,7 @@ class UpstreamClient:
                     "[chat] pre-create error (attempt %s/%s)",
                     attempt + 1,
                     attempts,
-                    exc_info=True,
+                    exc_info=settings.DEBUG_LOGGING,
                 )
 
             if attempt + 1 < attempts:
@@ -717,7 +720,7 @@ class UpstreamClient:
                         url=f"{self.base_url}/api/models",
                         context="upstream.models",
                     ),
-                    exc_info=True,
+                    exc_info=settings.DEBUG_LOGGING,
                 )
 
         return self._online_models or []
@@ -732,7 +735,10 @@ class UpstreamClient:
             await dao.set(self._MODELS_CACHE_KEY, json.dumps(models, ensure_ascii=False))
             self.logger.debug("在线模型缓存已写入数据库")
         except Exception as exc:
-            self.logger.warning("在线模型缓存写入数据库失败", exc_info=True)
+            self.logger.warning(
+                "在线模型缓存写入数据库失败",
+                exc_info=settings.DEBUG_LOGGING,
+            )
 
     async def load_cached_models(self) -> bool:
         """从数据库加载缓存的在线模型数据，成功返回 True。"""
@@ -756,7 +762,10 @@ class UpstreamClient:
             )
             return True
         except Exception as exc:
-            self.logger.warning("从数据库加载在线模型缓存失败", exc_info=True)
+            self.logger.warning(
+                "从数据库加载在线模型缓存失败",
+                exc_info=settings.DEBUG_LOGGING,
+            )
             return False
 
     def get_supported_models(self) -> List[str]:
@@ -862,7 +871,7 @@ class UpstreamClient:
                         context="guest_auth.direct",
                         attempt=retry_count + 1,
                     ),
-                    exc_info=True,
+                    exc_info=settings.DEBUG_LOGGING,
                 )
 
             if retry_count + 1 < max_retries:
@@ -922,7 +931,7 @@ class UpstreamClient:
                 except Exception as exc:
                     self.logger.warning(
                         "匿名会话池获取失败，转为直连访客鉴权",
-                        exc_info=True,
+                        exc_info=settings.DEBUG_LOGGING,
                     )
 
             return await self._fetch_direct_guest_auth()
@@ -1320,7 +1329,12 @@ class UpstreamClient:
                     return result, str(transformed.get("token") or "") or None
 
         except Exception as e:
-            self.logger.exception("%s 响应失败", self.name)
+            self.logger.error(
+                "%s 响应失败: %s",
+                self.name,
+                get_error_message(e),
+                exc_info=settings.DEBUG_LOGGING,
+            )
             try:
                 await self._release_guest_session(transformed)
             except Exception:

@@ -22,7 +22,7 @@ from app.core.openai_compat import (
     get_error_message,
     handle_error,
 )
-from app.utils.logger import logger
+from app.utils.logger import logger, log_exception
 
 
 # ------------------------------------------------------------------
@@ -324,7 +324,7 @@ class ResponseHandler:
                 ctx.finished = True
 
         except Exception as e:
-            logger.exception("stream error")
+            log_exception(logger, "stream error")
             if not ctx.finished:
                 yield format_sse_chunk(
                     create_openai_chunk(ctx.ensure_stream_id(), model, {}, "stop", created=ctx.created_at)
@@ -400,7 +400,7 @@ class ResponseHandler:
                     usage = event.usage
 
         except Exception as e:
-            logger.exception("non-stream error")
+            log_exception(logger, "non-stream error")
             return handle_error(e, "non-stream aggregation")
 
         final = "".join(content_parts).strip()

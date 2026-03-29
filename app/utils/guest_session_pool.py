@@ -17,7 +17,7 @@ from app.core.http_client import SharedHttpClients
 from app.core.headers import build_dynamic_headers as _build_dynamic_headers
 from app.core.httpx_errors import normalize_httpx_exception, normalize_httpx_response
 from app.utils.fe_version import get_latest_fe_version
-from app.utils.logger import logger
+from app.utils.logger import logger, log_exception
 from app.utils.utlis import mask_token
 
 
@@ -102,7 +102,10 @@ class GuestSessionPool:
             except asyncio.CancelledError:
                 pass
             except Exception as exc:
-                logger.warning("⚠️ 匿名会话后台任务异常", exc_info=True)
+                logger.warning(
+                    "⚠️ 匿名会话后台任务异常",
+                    exc_info=settings.DEBUG_LOGGING,
+                )
 
         task.add_done_callback(_on_done)
         return task
@@ -218,7 +221,7 @@ class GuestSessionPool:
                         await asyncio.sleep(min(2 ** (attempt - 1), 4))
                         continue
                 else:
-                    logger.exception("❌ 匿名会话创建异常")
+                    log_exception(logger, "❌ 匿名会话创建异常")
                 raise
 
     async def _delete_all_chats(self, session: GuestSession) -> bool:
@@ -261,7 +264,7 @@ class GuestSessionPool:
                     url=CHATS_URL,
                     context=f"guest_session.cleanup:{session.user_id}",
                 ),
-                exc_info=True,
+                exc_info=settings.DEBUG_LOGGING,
             )
 
         return False
@@ -424,7 +427,10 @@ class GuestSessionPool:
             except asyncio.CancelledError:
                 return
             except Exception as exc:
-                logger.warning("⚠️ 匿名会话池后台维护异常", exc_info=True)
+                logger.warning(
+                    "⚠️ 匿名会话池后台维护异常",
+                    exc_info=settings.DEBUG_LOGGING,
+                )
                 consecutive_failures += 1
                 if consecutive_failures >= self.max_failures:
                     logger.warning(
@@ -483,7 +489,8 @@ class GuestSessionPool:
                 created = 1
                 logger.debug("[pool] guest session pool success initialize")
             except Exception as e:
-                logger.exception(
+                log_exception(
+                    logger,
                     "[pool] guest session pool initialize failed，retrying in background"
                 )
         else:
@@ -512,7 +519,10 @@ class GuestSessionPool:
         except asyncio.TimeoutError:
             logger.warning("⚠️ 清理匿名会话记录超时，强制关闭")
         except Exception as e:
-            logger.warning("⚠️ 清理匿名会话记录异常", exc_info=True)
+            logger.warning(
+                "⚠️ 清理匿名会话记录异常",
+                exc_info=settings.DEBUG_LOGGING,
+            )
         finally:
             await self._http_clients.close()
 

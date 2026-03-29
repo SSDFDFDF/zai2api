@@ -15,7 +15,7 @@ from app.admin.stats import (
     get_process_uptime,
 )
 from app.admin.template_loader import templates
-from app.utils.logger import logger
+from app.utils.logger import logger, log_exception
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 DEFAULT_TOKEN_NAMESPACE = "zai"
@@ -47,7 +47,7 @@ async def login_page(request: Request):
             headers=_page_headers(),
         )
     except Exception:
-        logger.exception("渲染管理后台登录页失败")
+        log_exception(logger, "渲染管理后台登录页失败")
         return HTMLResponse(
             "<h1>Admin login page failed to render</h1>",
             status_code=500,
@@ -79,7 +79,7 @@ async def dashboard(request: Request):
             headers=_page_headers(),
         )
     except Exception:
-        logger.exception("渲染管理后台仪表盘失败")
+        log_exception(logger, "渲染管理后台仪表盘失败")
         raise
 
 
@@ -147,7 +147,7 @@ async def config_page(request: Request):
             headers=_page_headers(),
         )
     except Exception:
-        logger.exception("渲染管理后台配置页失败")
+        log_exception(logger, "渲染管理后台配置页失败")
         raise
 
 
@@ -162,7 +162,7 @@ async def request_logs_page(request: Request):
             headers=_page_headers(),
         )
     except Exception:
-        logger.exception("渲染管理后台请求日志页失败")
+        log_exception(logger, "渲染管理后台请求日志页失败")
         raise
 
 
@@ -177,7 +177,7 @@ async def runtime_logs_page(request: Request):
             headers=_page_headers(),
         )
     except Exception:
-        logger.exception("渲染管理后台运行日志页失败")
+        log_exception(logger, "渲染管理后台运行日志页失败")
         raise
 
 
@@ -222,5 +222,5 @@ async def tokens_page(request: Request):
             headers=_page_headers(),
         )
     except Exception:
-        logger.exception("渲染管理后台 Token 页失败")
+        log_exception(logger, "渲染管理后台 Token 页失败")
         raise

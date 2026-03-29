@@ -21,7 +21,7 @@ from app.core.config import settings
 from app.core.headers import build_dynamic_headers
 from app.core.file_upload import upload_file
 from app.utils.fe_version import get_latest_fe_version
-from app.utils.logger import logger
+from app.utils.logger import logger, log_exception
 from app.utils.signature import generate_signature
 
 
@@ -450,7 +450,7 @@ async def sign_request(
             signature[:16], user_id, request_id,
         )
     except Exception as e:
-        logger.exception("[上游] 签名生成失败")
+        log_exception(logger, "[上游] 签名生成失败")
         raise RuntimeError(f"签名生成失败: {e}") from e
 
     # 构建请求头（保留所有字段）

@@ -722,7 +722,10 @@ async def load_db_overrides() -> dict[str, Any]:
         dao = get_config_dao()
         raw_items = await dao.get_all()
     except Exception as exc:
-        logger.debug("读取数据库配置失败，回退到环境变量", exc_info=True)
+        logger.debug(
+            "读取数据库配置失败，回退到环境变量",
+            exc_info=settings.DEBUG_LOGGING,
+        )
         return {}
 
     overrides: dict[str, Any] = {}
@@ -953,7 +956,10 @@ async def save_form_config(
             await dao.set_many(db_updates)
             logger.debug("已保存 %s 项配置到数据库", len(db_updates))
         except Exception as exc:
-            logger.warning("⚠️ 数据库保存失败，回退到环境变量", exc_info=True)
+            logger.warning(
+                "⚠️ 数据库保存失败，回退到环境变量",
+                exc_info=settings.DEBUG_LOGGING,
+            )
             env_updates.update(updates)  # fallback: 全部写入 .env
             db_updates.clear()
 

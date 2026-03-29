@@ -6,7 +6,7 @@ import asyncio
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from app.utils.logger import logger
+from app.utils.logger import logger, log_exception
 
 
 @dataclass(frozen=True)
@@ -119,7 +119,7 @@ class AsyncTokenStatsWriter:
                         await asyncio.shield(self._write_batch(batch))
                 raise
             except Exception as exc:
-                logger.exception("AsyncTokenStatsWriter flush error")
+                log_exception(logger, "AsyncTokenStatsWriter flush error")
                 await asyncio.sleep(1)
 
     async def _collect_batch(self, *, wait_for_first: bool) -> List[TokenStatsUpdate]:

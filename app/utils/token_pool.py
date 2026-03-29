@@ -20,7 +20,7 @@ from typing import Dict, List, Optional, Set, Tuple
 import httpx
 
 from app.core.httpx_errors import normalize_httpx_exception
-from app.utils.logger import logger
+from app.utils.logger import logger, log_exception
 from app.utils.utlis import mask_token
 
 
@@ -386,7 +386,7 @@ class TokenPool:
         try:
             await dao.record_success(token_id)
         except Exception as e:
-            logger.exception("❌ 同步 Token 成功统计失败")
+            log_exception(logger, "❌ 同步 Token 成功统计失败")
             return
 
         await self.mark_stats_synced(token=token, successful_requests=1)
@@ -416,7 +416,7 @@ class TokenPool:
         try:
             await dao.record_failure(token_id)
         except Exception as e:
-            logger.exception("❌ 同步 Token 失败统计失败")
+            log_exception(logger, "❌ 同步 Token 失败统计失败")
             return
 
         await self.mark_stats_synced(token=token, failed_requests=1)

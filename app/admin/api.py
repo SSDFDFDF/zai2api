@@ -32,7 +32,12 @@ from app.admin.template_loader import templates
 from app.core.config import settings
 from app.services.request_log_dao import get_request_log_dao
 from app.utils.format import format_compact_number
-from app.utils.logger import DEFAULT_LOG_DIR, logger, resolve_log_file_path
+from app.utils.logger import (
+    DEFAULT_LOG_DIR,
+    logger,
+    log_exception,
+    resolve_log_file_path,
+)
 from app.utils.utlis import mask_token
 
 router = APIRouter(prefix="/admin/api", tags=["admin-api"])
@@ -100,7 +105,7 @@ async def login(request: Request):
             }, status_code=401)
 
     except Exception as e:
-        logger.exception("❌ 登录异常")
+        log_exception(logger, "❌ 登录异常")
         return JSONResponse({
             "success": False,
             "message": "登录失败"
@@ -580,7 +585,7 @@ async def save_config(request: Request):
             status_code=200,  # return 200 so HTMX swaps the feedback
         )
     except Exception as exc:
-        logger.exception("❌ 配置保存失败")
+        log_exception(logger, "❌ 配置保存失败")
         return _build_alert(
             f"保存失败: {exc}",
             title="错误！",
@@ -618,7 +623,7 @@ async def save_config_source(request: Request):
             status_code=400,
         )
     except Exception as exc:
-        logger.exception("❌ 源文件保存失败")
+        log_exception(logger, "❌ 源文件保存失败")
         return _build_alert(
             f"源文件保存失败: {exc}",
             title="错误！",
@@ -653,7 +658,7 @@ async def reset_config():
             status_code=404,
         )
     except Exception as exc:
-        logger.exception("❌ 配置重置失败")
+        log_exception(logger, "❌ 配置重置失败")
         return _build_alert(
             f"重置失败: {exc}",
             title="错误！",
@@ -850,7 +855,7 @@ async def import_tokens_from_directory_api(request: Request):
             status_code=409,
         )
     except Exception as exc:
-        logger.exception("❌ 本地目录导入 Token 失败")
+        log_exception(logger, "❌ 本地目录导入 Token 失败")
         return _build_alert(
             f"目录扫描或入库异常: {exc}",
             title="导入失败！",
@@ -932,7 +937,7 @@ async def import_tokens_from_upload_api(
             validate=True,
         )
     except Exception as exc:
-        logger.exception("❌ 上传 JSON 文件导入 Token 失败")
+        log_exception(logger, "❌ 上传 JSON 文件导入 Token 失败")
         return _build_alert(
             f"文件解析或入库异常: {exc}",
             title="导入失败！",
@@ -1036,7 +1041,7 @@ async def run_token_maintenance_api(request: Request):
             status_code=409,
         )
     except Exception as exc:
-        logger.exception("❌ 手动执行 Token 维护失败")
+        log_exception(logger, "❌ 手动执行 Token 维护失败")
         return _build_alert(
             f"Token 维护失败: {exc}",
             title="维护失败！",
@@ -1347,7 +1352,7 @@ async def refresh_online_models():
             "admin-models-refresh",
         )
     except Exception as exc:
-        logger.exception("❌ 在线模型刷新失败")
+        log_exception(logger, "❌ 在线模型刷新失败")
         return _build_alert(
             f"刷新失败: {exc}",
             title="错误！",

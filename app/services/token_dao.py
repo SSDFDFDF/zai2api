@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.database import get_db_session as global_async_session
 from app.models.db_models import Token, TokenStats
-from app.utils.logger import logger
+from app.utils.logger import logger, log_exception
 
 
 class TokenDAO:
@@ -93,7 +93,7 @@ class TokenDAO:
                 logger.debug("添加 Token: %s (%s) - %s...", provider, token_type, token[:20])
                 return new_token.id
         except Exception as e:
-            logger.exception("❌ 添加 Token 失败")
+            log_exception(logger, "❌ 添加 Token 失败")
             return None
 
     def _format_token_row(self, token_item: Token) -> Dict:
@@ -136,7 +136,7 @@ class TokenDAO:
                 result = await session.execute(stmt)
                 return [self._format_token_row(t) for t in result.scalars()]
         except Exception as e:
-            logger.exception("❌ 查询 Token 失败")
+            log_exception(logger, "❌ 查询 Token 失败")
             return []
 
     async def get_tokens_needing_chat_cleanup(self, provider: str, interval_days: int) -> List[Dict]:
@@ -156,7 +156,7 @@ class TokenDAO:
                 result = await session.execute(stmt)
                 return [self._format_token_row(t) for t in result.scalars()]
         except Exception as e:
-            logger.exception("❌ 查询需要清理会话的 Token 失败")
+            log_exception(logger, "❌ 查询需要清理会话的 Token 失败")
             return []
 
     async def get_all_tokens(self, enabled_only: bool = False) -> List[Dict]:
@@ -171,7 +171,7 @@ class TokenDAO:
                 result = await session.execute(stmt)
                 return [self._format_token_row(t) for t in result.scalars()]
         except Exception as e:
-            logger.exception("❌ 查询所有 Token 失败")
+            log_exception(logger, "❌ 查询所有 Token 失败")
             return []
 
     async def update_token_status(self, token_id: int, is_enabled: bool):
@@ -181,7 +181,7 @@ class TokenDAO:
                 await session.execute(stmt)
                 await session.commit()
         except Exception as e:
-            logger.exception("❌ 更新 Token 状态失败")
+            log_exception(logger, "❌ 更新 Token 状态失败")
 
     async def update_last_chat_cleanup(self, token_id: int):
         try:
@@ -193,7 +193,7 @@ class TokenDAO:
                 await session.commit()
                 logger.debug("更新 Token 会话清理时间: id=%s", token_id)
         except Exception as e:
-            logger.exception("❌ 更新 Token 会话清理时间失败")
+            log_exception(logger, "❌ 更新 Token 会话清理时间失败")
 
     async def update_token_type(self, token_id: int, token_type: str):
         try:
@@ -202,7 +202,7 @@ class TokenDAO:
                 await session.execute(stmt)
                 await session.commit()
         except Exception as e:
-            logger.exception("❌ 更新 Token 类型失败")
+            log_exception(logger, "❌ 更新 Token 类型失败")
 
     async def delete_token(self, token_id: int):
         try:
@@ -211,7 +211,7 @@ class TokenDAO:
                 await session.execute(stmt)
                 await session.commit()
         except Exception as e:
-            logger.exception("❌ 删除 Token 失败")
+            log_exception(logger, "❌ 删除 Token 失败")
 
     async def delete_tokens_by_ids(self, token_ids: List[int]) -> int:
         if not token_ids:
@@ -225,7 +225,7 @@ class TokenDAO:
                 logger.info(f"✅ 批量删除 Token: {deleted_count} 个")
                 return deleted_count
         except Exception as e:
-            logger.exception("❌ 批量删除 Token 失败")
+            log_exception(logger, "❌ 批量删除 Token 失败")
             return 0
 
     async def delete_tokens_by_provider(self, provider: str):
@@ -236,7 +236,7 @@ class TokenDAO:
                 await session.commit()
                 logger.info(f"✅ 删除提供商所有 Token: {provider}")
         except Exception as e:
-            logger.exception("❌ 删除提供商 Token 失败")
+            log_exception(logger, "❌ 删除提供商 Token 失败")
 
     # ==================== Token 统计操作 ====================
 
@@ -251,7 +251,7 @@ class TokenDAO:
                 await session.execute(stmt)
                 await session.commit()
         except Exception as e:
-            logger.exception("❌ 记录成功失败")
+            log_exception(logger, "❌ 记录成功失败")
 
     async def record_failure(self, token_id: int):
         try:
@@ -264,7 +264,7 @@ class TokenDAO:
                 await session.execute(stmt)
                 await session.commit()
         except Exception as e:
-            logger.exception("❌ 记录失败失败")
+            log_exception(logger, "❌ 记录失败失败")
 
     async def record_stats_batch(self, updates: Dict[int, Dict[str, Any]]) -> None:
         """批量累加 Token 统计，减少热路径上的频繁提交。"""
@@ -301,7 +301,7 @@ class TokenDAO:
                     await session.execute(stmt)
                 await session.commit()
         except Exception as e:
-            logger.exception("❌ 批量记录 Token 统计失败")
+            log_exception(logger, "❌ 批量记录 Token 统计失败")
             raise
 
     async def get_token_stats(self, token_id: int) -> Optional[Dict]:
@@ -322,7 +322,7 @@ class TokenDAO:
                     "last_failure_time": str(stats.last_failure_time) if stats.last_failure_time else None,
                 }
         except Exception as e:
-            logger.exception("❌ 获取统计信息失败")
+            log_exception(logger, "❌ 获取统计信息失败")
             return None
 
     # ==================== 批量操作 ====================
@@ -389,7 +389,7 @@ class TokenDAO:
                 logger.info(f"✅ 已清理重复 Token: {deleted_count} 个")
             return deleted_count
         except Exception as e:
-            logger.exception("❌ 清理重复 Token 失败")
+            log_exception(logger, "❌ 清理重复 Token 失败")
             return 0
 
     # ==================== 实用方法 ====================
@@ -405,7 +405,7 @@ class TokenDAO:
                     return None
                 return self._format_token_row(token_item)
         except Exception as e:
-            logger.exception("❌ 查询 Token 失败")
+            log_exception(logger, "❌ 查询 Token 失败")
             return None
 
     async def get_token_by_value(self, provider: str, token: str) -> Optional[Dict]:
@@ -419,7 +419,7 @@ class TokenDAO:
                     return None
                 return self._format_token_row(token_item)
         except Exception as e:
-            logger.exception("❌ 查询 Token 失败")
+            log_exception(logger, "❌ 查询 Token 失败")
             return None
 
     async def get_provider_stats(self, provider: str) -> Dict:
@@ -443,7 +443,7 @@ class TokenDAO:
                     return {}
                 return dict(row)
         except Exception as e:
-            logger.exception("❌ 获取提供商统计失败")
+            log_exception(logger, "❌ 获取提供商统计失败")
             return {}
 
     async def get_provider_token_counts(self, provider: str) -> Dict[str, int]:
@@ -477,7 +477,7 @@ class TokenDAO:
                     "unknown_tokens": int(row["unknown_tokens"] or 0),
                 }
         except Exception as e:
-            logger.exception("❌ 获取 Token 数量统计失败")
+            log_exception(logger, "❌ 获取 Token 数量统计失败")
             return {
                 "total_tokens": 0, "enabled_tokens": 0,
                 "user_tokens": 0, "guest_tokens": 0, "unknown_tokens": 0,
@@ -496,7 +496,7 @@ class TokenDAO:
                 result = await session.execute(stmt)
                 return result.scalar() or 0
         except Exception as e:
-            logger.exception("❌ 统计 Token 总数失败")
+            log_exception(logger, "❌ 统计 Token 总数失败")
             return 0
 
     # ==================== Token 验证操作 ====================
@@ -525,7 +525,7 @@ class TokenDAO:
             return is_valid
 
         except Exception as e:
-            logger.exception("❌ 验证 Token 失败")
+            log_exception(logger, "❌ 验证 Token 失败")
             return False
 
     async def validate_tokens_detailed(self, provider: str = "zai") -> Dict[str, Any]:
@@ -584,7 +584,7 @@ class TokenDAO:
             return stats
 
         except Exception as e:
-            logger.exception("❌ 批量验证失败")
+            log_exception(logger, "❌ 批量验证失败")
             return {
                 "checked": 0, "valid": 0, "guest": 0, "invalid": 0, "invalid_token_ids": [],
             }
