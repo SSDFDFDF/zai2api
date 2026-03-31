@@ -153,6 +153,11 @@ async def reload_settings():
     from app.admin.config_manager import apply_db_overrides
 
     await apply_db_overrides(settings)
+    from app.utils.token_pool import normalize_token_load_balance_strategy
+
+    settings.TOKEN_LOAD_BALANCE_STRATEGY = normalize_token_load_balance_strategy(
+        settings.TOKEN_LOAD_BALANCE_STRATEGY
+    )
 
     # 重新初始化 logger（使用新的 DEBUG_LOGGING 配置）
     setup_logger(log_dir=DEFAULT_LOG_DIR, debug_mode=settings.DEBUG_LOGGING)

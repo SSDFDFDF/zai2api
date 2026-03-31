@@ -724,6 +724,19 @@ def _parse_db_value(raw: str, value_type: str) -> Any:
     return raw
 
 
+def _is_valid_option_value(field: ConfigFieldSpec, value: Any) -> bool:
+    if field.input_type != "select" or not field.options:
+        return True
+    return str(value or "") in field.options
+
+
+def _is_valid_db_override_value(field: ConfigFieldSpec, raw_value: str) -> bool:
+    parsed = _parse_db_value(raw_value, field.value_type)
+    if parsed is None and field.value_type != "str":
+        return False
+    return _is_valid_option_value(field, parsed)
+
+
 async def load_db_overrides() -> dict[str, Any]:
     """从数据库加载可持久化的配置值，按类型解析后返回。
 
@@ -750,6 +763,9 @@ async def load_db_overrides() -> dict[str, Any]:
         if field is None:
             continue
         parsed = _parse_db_value(raw_value, field.value_type)
+        if not _is_valid_db_override_value(field, raw_value):
+            logger.warning("忽略无效的数据库配置项: %s=%s", key, raw_value)
+            continue
         if parsed is not None or field.value_type == "str":
             overrides[key] = parsed
     return overrides
@@ -774,7 +790,14 @@ def build_config_page_data(
     env_file = Path(env_path)
     env_content = read_env_content(env_file)
     env_values = dotenv_values(env_file) if env_file.exists() else {}
-    db_keys = set(db_values.keys()) if db_values else set()
+    valid_db_keys = {
+        key
+        for key, raw_value in (db_values or {}).items()
+        if (
+            (field := CONFIG_FIELD_SPECS.get(key)) is not None
+            and _is_valid_db_override_value(field, raw_value)
+        )
+    }
     sections: list[dict[str, Any]] = []
     total_fields = 0
     overridden_fields = 0
@@ -791,7 +814,7 @@ def build_config_page_data(
                 restart_required_fields += 1
 
             # 判断来源优先级：数据库 > .env > 默认值
-            in_db = field.key in db_keys
+            in_db = field.key in valid_db_keys
             in_env = field.key in env_values
             if in_db:
                 source_label = "数据库"
@@ -912,6 +935,11 @@ def build_form_updates(form_data: Mapping[str, Any]) -> dict[str, object]:
                 )
             updates[key] = parsed_float
             continue
+
+        if field.input_type == "select" and field.options and raw_value not in field.options:
+            raise ValueError(
+                f"{field.label} 必须是以下选项之一：{', '.join(field.options)}。"
+            )
 
         updates[key] = raw_value
 

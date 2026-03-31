@@ -51,6 +51,28 @@ async def test_token_pool_least_loaded_strategy_prefers_less_loaded_tokens():
 
 
 @pytest.mark.asyncio
+async def test_token_pool_release_token_allocation_only_reduces_active_requests():
+    pool = TokenPool(
+        [
+            (1, "token-a", "user"),
+            (2, "token-b", "user"),
+        ],
+        strategy=TOKEN_LOAD_BALANCE_LEAST_LOADED,
+    )
+
+    assert await pool.get_next_token() == "token-a"
+    status = pool.token_statuses["token-a"]
+    assert status.active_requests == 1
+    assert status.total_requests == 0
+
+    await pool.release_token_allocation("token-a")
+
+    assert status.active_requests == 0
+    assert status.total_requests == 0
+    assert status.successful_requests == 0
+
+
+@pytest.mark.asyncio
 async def test_token_pool_circuit_breaker_recovers_after_cooldown(monkeypatch):
     current_time = 1000.0
     monkeypatch.setattr(token_pool_module.time, "time", lambda: current_time)
@@ -104,6 +126,37 @@ async def test_token_pool_sync_from_database_rebuilds_user_order(monkeypatch):
 
     assert await pool.get_next_token() == "token-b"
     assert await pool.get_next_token() == "token-a"
+
+
+@pytest.mark.asyncio
+async def test_token_pool_sync_from_database_resets_weight_after_priority_change(monkeypatch):
+    pool = TokenPool(
+        [
+            (1, "token-a", "user", 0),
+            (2, "token-b", "user", 0),
+        ],
+        strategy=TOKEN_LOAD_BALANCE_SMOOTH_WEIGHTED,
+    )
+
+    token = await pool.get_next_token()
+    assert token == "token-a"
+    await pool.mark_token_success(token)
+    assert pool.token_statuses["token-a"].current_weight != 0
+    assert pool.token_statuses["token-b"].current_weight != 0
+
+    class StubDAO:
+        async def get_tokens_by_provider(self, provider: str, enabled_only: bool = True):
+            return [
+                {"id": 1, "token": "token-a", "token_type": "user", "priority": 0},
+                {"id": 2, "token": "token-b", "token_type": "user", "priority": 1},
+            ]
+
+    monkeypatch.setattr(token_dao_module, "get_token_dao", lambda: StubDAO())
+
+    await pool.sync_from_database("zai")
+
+    assert pool.token_statuses["token-a"].current_weight == 0
+    assert pool.token_statuses["token-b"].current_weight == 0
 
 
 @pytest.mark.asyncio

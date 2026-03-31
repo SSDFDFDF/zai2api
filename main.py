@@ -89,6 +89,11 @@ async def lifespan(app: FastAPI):
 
     # 加载数据库配置覆盖
     await apply_db_overrides(settings)
+    from app.utils.token_pool import normalize_token_load_balance_strategy
+
+    settings.TOKEN_LOAD_BALANCE_STRATEGY = normalize_token_load_balance_strategy(
+        settings.TOKEN_LOAD_BALANCE_STRATEGY
+    )
     setup_logger(log_dir=DEFAULT_LOG_DIR, debug_mode=settings.DEBUG_LOGGING)
     logger.info(
         "[config.startup] ANONYMOUS_MODE env=%s db=%s effective=%s TOKEN_AUTO_IMPORT_ENABLED env=%s db=%s effective=%s TOKEN_AUTO_MAINTENANCE_ENABLED env=%s db=%s effective=%s MODEL_AUTO_REFRESH_HOURS env=%s db=%s effective=%s",

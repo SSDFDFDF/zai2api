@@ -188,6 +188,22 @@ class UpstreamClient:
         """释放当前匿名会话占用。"""
         await self._retry_policy.release_guest_session(transformed)
 
+    async def _release_authenticated_token_allocation(
+        self,
+        transformed: Optional[Dict[str, Any]],
+    ) -> None:
+        """释放认证 token 的并发占用，不记录成功或失败。"""
+        if not transformed or self._is_guest_auth(transformed):
+            return
+
+        token = str(transformed.get("token") or "")
+        if not token:
+            return
+
+        token_pool = get_token_pool()
+        if token_pool:
+            await token_pool.release_token_allocation(token)
+
     async def _report_guest_session_failure(
         self,
         transformed: Dict[str, Any],
@@ -1125,6 +1141,7 @@ class UpstreamClient:
 
         except Exception:
             # 签名/构建失败时归还 guest session，避免永久占用
+            await self._release_authenticated_token_allocation(auth_info)
             await self._release_guest_session(auth_info)
             raise
 
@@ -1164,6 +1181,7 @@ class UpstreamClient:
         self.logger.debug("  消息数量: %s", len(request.messages))
         self.logger.debug("  流式模式: %s", request.stream)
 
+        transformed: Dict[str, Any] = {}
         try:
             transformed = await self.transform_request(request)
             max_attempts = await self._get_total_retry_limit()
@@ -1207,6 +1225,9 @@ class UpstreamClient:
                     )
 
                     if is_page_error:
+                        await self._release_authenticated_token_allocation(
+                            transformed
+                        )
                         await self._release_guest_session(transformed)
                         self.logger.error(
                             "%s",
@@ -1336,6 +1357,7 @@ class UpstreamClient:
                 exc_info=settings.DEBUG_LOGGING,
             )
             try:
+                await self._release_authenticated_token_allocation(transformed)
                 await self._release_guest_session(transformed)
             except Exception:
                 pass
@@ -1369,6 +1391,7 @@ class UpstreamClient:
 
         for attempt in range(max_attempts):
             if _remaining_timeout() <= 0:
+                await self._release_authenticated_token_allocation(transformed)
                 await self._release_guest_session(transformed)
                 return {
                     "error": {
@@ -1469,6 +1492,9 @@ class UpstreamClient:
 
                 if is_page_error:
                     await response.aclose()
+                    await self._release_authenticated_token_allocation(
+                        transformed
+                    )
                     self.logger.error(
                         "%s",
                         normalize_httpx_response(
@@ -1635,6 +1661,13 @@ class UpstreamClient:
                             "[stream] stream task cancelled (chat_id=%s)",
                             chat_id,
                         )
+                        if (
+                            not self._is_guest_auth(transformed)
+                            and current_token
+                        ):
+                            await self._release_authenticated_token_allocation(
+                                transformed
+                            )
                     except Exception as e:
                         friendly_msg = get_error_message(e)
                         self.logger.error(
@@ -1706,6 +1739,7 @@ class UpstreamClient:
                     }
                 }
 
+        await self._release_authenticated_token_allocation(transformed)
         await self._release_guest_session(transformed)
         return {
             "error": {

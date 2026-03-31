@@ -10,6 +10,7 @@ from app.admin import api as admin_api
 from app.core.config import settings
 from app.admin.config_manager import (
     CONFIG_FIELD_SPECS,
+    build_form_updates,
     build_config_page_data,
     get_config_source_snapshot,
     save_form_config,
@@ -194,6 +195,13 @@ async def test_save_config_endpoint_returns_refresh_trigger(tmp_path, monkeypatc
     assert response.headers["HX-Trigger"] == "admin-config-refresh"
     assert "保存成功" in body
     assert "SERVICE_NAME=after" in (tmp_path / ".env").read_text(encoding="utf-8")
+
+
+def test_build_form_updates_rejects_invalid_select_option():
+    payload = _build_form_payload(TOKEN_LOAD_BALANCE_STRATEGY="not-a-strategy")
+
+    with pytest.raises(ValueError, match="负载策略"):
+        build_form_updates(payload)
 
 
 

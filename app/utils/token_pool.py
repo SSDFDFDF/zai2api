@@ -37,6 +37,13 @@ SUPPORTED_TOKEN_LOAD_BALANCE_STRATEGIES = {
 }
 
 
+def normalize_token_load_balance_strategy(strategy: Optional[str]) -> str:
+    normalized = str(strategy or "").strip().lower()
+    if normalized in SUPPORTED_TOKEN_LOAD_BALANCE_STRATEGIES:
+        return normalized
+    return TOKEN_LOAD_BALANCE_SMOOTH_WEIGHTED
+
+
 @dataclass
 class TokenStatus:
     """Token 运行时状态（内存中）"""
@@ -304,10 +311,7 @@ class TokenPool:
 
     @staticmethod
     def _normalize_strategy(strategy: Optional[str]) -> str:
-        normalized = str(strategy or "").strip().lower()
-        if normalized in SUPPORTED_TOKEN_LOAD_BALANCE_STRATEGIES:
-            return normalized
-        return TOKEN_LOAD_BALANCE_SMOOTH_WEIGHTED
+        return normalize_token_load_balance_strategy(strategy)
 
     @staticmethod
     def _priority_weight(priority: int) -> int:
@@ -319,6 +323,14 @@ class TokenPool:
             self.strategy = normalized
             for status in self.token_statuses.values():
                 status.current_weight = 0
+
+    async def release_token_allocation(self, token: str) -> None:
+        """释放一次已占用但未完成记账的 token 并发槽位。"""
+        async with self._lock:
+            status = self.token_statuses.get(token)
+            if status is None:
+                return
+            status.active_requests = max(0, status.active_requests - 1)
 
     def _select_round_robin(
         self,
@@ -778,6 +790,7 @@ class TokenPool:
 
         async with self._lock:
             # 1. 移除已在数据库中禁用的 Token
+            should_reset_weights = False
             tokens_to_remove = []
             for token_value in list(self.token_statuses.keys()):
                 if token_value not in db_tokens:
@@ -786,6 +799,8 @@ class TokenPool:
             for token_value in tokens_to_remove:
                 del self.token_statuses[token_value]
                 del self.token_id_map[token_value]
+            if tokens_to_remove:
+                should_reset_weights = True
 
             # 2. 添加新启用的 Token
             new_tokens_count = 0
@@ -802,6 +817,7 @@ class TokenPool:
                     )
                     self.token_id_map[token_value] = token_id
                     new_tokens_count += 1
+                    should_reset_weights = True
 
             # 3. 更新现有 Token 的类型（如果数据库中有更新）
             for token_value, (token_id, token_type, priority) in db_tokens.items():
@@ -810,7 +826,14 @@ class TokenPool:
                     old_type = status.token_type
                     if old_type != token_type:
                         status.token_type = token_type
-                    status.priority = priority
+                        should_reset_weights = True
+                    if status.priority != priority:
+                        status.priority = priority
+                        should_reset_weights = True
+
+            if should_reset_weights and self.strategy == TOKEN_LOAD_BALANCE_SMOOTH_WEIGHTED:
+                for status in self.token_statuses.values():
+                    status.current_weight = 0
 
             self._user_tokens = ordered_user_tokens
             if self._user_tokens:
@@ -878,8 +901,9 @@ async def initialize_token_pool_from_db(
 
         # 过滤掉 guest token（不应该在数据库中，但防御性检查）
         user_tokens = [
-            (tid, tval, ttype) for tid, tval, ttype in tokens
-            if ttype != "guest"
+            token_record
+            for token_record in tokens
+            if str(token_record[2]) != "guest"
         ]
 
         if len(user_tokens) < len(tokens):

@@ -172,6 +172,7 @@ async def test_stream_html_page_response_is_intercepted():
     upstream = UpstreamClient()
     upstream._get_shared_stream_client = MagicMock(return_value=client_mock)
     upstream._get_total_retry_limit = AsyncMock(return_value=1)
+    upstream._release_authenticated_token_allocation = AsyncMock()
 
     request = OpenAIRequest(
         model="gpt-3.5-turbo",
@@ -196,3 +197,46 @@ async def test_stream_html_page_response_is_intercepted():
             "code": 502,
         }
     }
+    upstream._release_authenticated_token_allocation.assert_awaited_once_with(
+        transformed
+    )
+
+
+@pytest.mark.asyncio
+async def test_non_stream_html_page_response_releases_token_allocation():
+    client_mock = AsyncMock()
+    client_mock.post.return_value = httpx.Response(
+        200,
+        headers={"content-type": "text/html; charset=utf-8"},
+        content=b"<!DOCTYPE html><html><body><h1>Blocked</h1></body></html>",
+        request=httpx.Request("POST", "http://api.example.com"),
+    )
+
+    upstream = UpstreamClient()
+    upstream.transform_request = AsyncMock(
+        return_value={
+            "url": "http://api.example.com",
+            "headers": {},
+            "body": {},
+            "token": "test-token",
+            "chat_id": "test-chat-id",
+            "model": "gpt-3.5-turbo",
+            "auth_mode": "authenticated",
+        }
+    )
+    upstream._get_shared_client = MagicMock(return_value=client_mock)
+    upstream._get_total_retry_limit = AsyncMock(return_value=1)
+    upstream._release_authenticated_token_allocation = AsyncMock()
+    upstream._release_guest_session = AsyncMock()
+
+    request = OpenAIRequest(
+        model="gpt-3.5-turbo",
+        messages=[{"role": "user", "content": "hello"}],
+        stream=False,
+    )
+
+    response, token = await upstream.chat_completion(request)
+
+    assert token == "test-token"
+    assert response["error"]["type"] == "upstream_page_error"
+    upstream._release_authenticated_token_allocation.assert_awaited_once()
