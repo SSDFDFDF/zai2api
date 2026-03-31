@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     # Token池配置
     TOKEN_FAILURE_THRESHOLD: int = int(os.getenv("TOKEN_FAILURE_THRESHOLD", "3"))  # 失败3次后标记为不可用
     TOKEN_RECOVERY_TIMEOUT: int = int(os.getenv("TOKEN_RECOVERY_TIMEOUT", "1800"))  # 30分钟后重试失败的token
+    TOKEN_LOAD_BALANCE_STRATEGY: str = os.getenv(
+        "TOKEN_LOAD_BALANCE_STRATEGY",
+        "smooth_weighted_round_robin",
+    )
     TOKEN_AUTO_IMPORT_ENABLED: bool = (
         os.getenv("TOKEN_AUTO_IMPORT_ENABLED", "false").lower() == "true"
     )

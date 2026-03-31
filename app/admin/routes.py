@@ -213,6 +213,7 @@ async def tokens_page(request: Request):
                 "maintenance_interval": settings.TOKEN_AUTO_MAINTENANCE_INTERVAL,
                 "maintenance_actions": maintenance_actions,
                 "has_maintenance_actions": bool(maintenance_actions),
+                "load_balance_strategy": settings.TOKEN_LOAD_BALANCE_STRATEGY,
             },
         }
         return templates.TemplateResponse(

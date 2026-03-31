@@ -27,17 +27,31 @@ from app.utils.utlis import mask_token
 # ==================== Token 状态管理 ====================
 
 
+TOKEN_LOAD_BALANCE_ROUND_ROBIN = "round_robin"
+TOKEN_LOAD_BALANCE_LEAST_LOADED = "least_loaded"
+TOKEN_LOAD_BALANCE_SMOOTH_WEIGHTED = "smooth_weighted_round_robin"
+SUPPORTED_TOKEN_LOAD_BALANCE_STRATEGIES = {
+    TOKEN_LOAD_BALANCE_ROUND_ROBIN,
+    TOKEN_LOAD_BALANCE_LEAST_LOADED,
+    TOKEN_LOAD_BALANCE_SMOOTH_WEIGHTED,
+}
+
+
 @dataclass
 class TokenStatus:
     """Token 运行时状态（内存中）"""
     token: str
     token_id: int  # 数据库 ID，用于同步统计
     token_type: str = "unknown"  # "user", "guest", "unknown"
+    priority: int = 0
     is_available: bool = True
     failure_count: int = 0
     cooldown_until: float = 0.0
     last_failure_time: float = 0.0
     last_success_time: float = 0.0
+    last_selected_time: float = 0.0
+    active_requests: int = 0
+    current_weight: int = 0
     total_requests: int = 0
     successful_requests: int = 0
     db_synced_successful_requests: int = 0
@@ -244,9 +258,10 @@ class TokenPool:
 
     def __init__(
         self,
-        tokens: List[Tuple[int, str, str]],  # [(token_id, token_value, token_type), ...]
+        tokens: List[Tuple[int, str, str]],  # [(token_id, token_value, token_type[, priority]), ...]
         failure_threshold: int = 3,
-        recovery_timeout: int = 1800
+        recovery_timeout: int = 1800,
+        strategy: str = TOKEN_LOAD_BALANCE_SMOOTH_WEIGHTED,
     ):
         """
         初始化 Token 池
@@ -260,18 +275,25 @@ class TokenPool:
         self.recovery_timeout = recovery_timeout
         self._lock = Lock()
         self._current_index = 0
+        self.strategy = self._normalize_strategy(strategy)
 
         # 初始化 Token 状态（内存中）
         self.token_statuses: Dict[str, TokenStatus] = {}
         self.token_id_map: Dict[str, int] = {}  # token -> token_id 映射
         self._user_tokens: List[str] = []
 
-        for token_id, token_value, token_type in tokens:
+        for token_record in tokens:
+            if len(token_record) >= 4:
+                token_id, token_value, token_type, priority = token_record[:4]
+            else:
+                token_id, token_value, token_type = token_record[:3]
+                priority = 0
             if token_value and token_value not in self.token_statuses:
                 self.token_statuses[token_value] = TokenStatus(
                     token=token_value,
                     token_id=token_id,
-                    token_type=token_type
+                    token_type=token_type,
+                    priority=int(priority or 0),
                 )
                 self.token_id_map[token_value] = token_id
                 if token_type == "user":
@@ -280,9 +302,124 @@ class TokenPool:
         if not self.token_statuses:
             logger.warning("⚠️ Token 池为空，将依赖匿名模式")
 
+    @staticmethod
+    def _normalize_strategy(strategy: Optional[str]) -> str:
+        normalized = str(strategy or "").strip().lower()
+        if normalized in SUPPORTED_TOKEN_LOAD_BALANCE_STRATEGIES:
+            return normalized
+        return TOKEN_LOAD_BALANCE_SMOOTH_WEIGHTED
+
+    @staticmethod
+    def _priority_weight(priority: int) -> int:
+        return max(1, int(priority or 0) + 1)
+
+    async def set_strategy(self, strategy: str) -> None:
+        normalized = self._normalize_strategy(strategy)
+        async with self._lock:
+            self.strategy = normalized
+            for status in self.token_statuses.values():
+                status.current_weight = 0
+
+    def _select_round_robin(
+        self,
+        candidates: List[Tuple[int, str, TokenStatus]],
+        total_tokens: int,
+        current_time: float,
+    ) -> Optional[str]:
+        if not candidates:
+            return None
+        index, token, status = candidates[0]
+        status.active_requests += 1
+        status.last_selected_time = current_time
+        self._current_index = (index + 1) % total_tokens
+        return token
+
+    def _select_least_loaded(
+        self,
+        candidates: List[Tuple[int, str, TokenStatus]],
+        total_tokens: int,
+        current_time: float,
+    ) -> Optional[str]:
+        if not candidates:
+            return None
+        index, token, status = min(
+            candidates,
+            key=lambda item: (
+                item[2].active_requests,
+                item[2].total_requests,
+                item[2].last_selected_time,
+                item[0],
+            ),
+        )
+        status.active_requests += 1
+        status.last_selected_time = current_time
+        self._current_index = (index + 1) % total_tokens
+        return token
+
+    def _select_smooth_weighted(
+        self,
+        candidates: List[Tuple[int, str, TokenStatus]],
+        total_tokens: int,
+        current_time: float,
+    ) -> Optional[str]:
+        if not candidates:
+            return None
+
+        min_active_requests = min(status.active_requests for _, _, status in candidates)
+        shortlist = [
+            (index, token, status)
+            for index, token, status in candidates
+            if status.active_requests == min_active_requests
+        ]
+
+        total_weight = 0
+        selected: Optional[Tuple[int, str, TokenStatus]] = None
+
+        for candidate in shortlist:
+            index, token, status = candidate
+            weight = self._priority_weight(status.priority)
+            status.current_weight += weight
+            total_weight += weight
+
+            if selected is None:
+                selected = candidate
+                continue
+
+            selected_index, selected_token, selected_status = selected
+            if (
+                status.current_weight > selected_status.current_weight
+                or (
+                    status.current_weight == selected_status.current_weight
+                    and (
+                        status.total_requests < selected_status.total_requests
+                        or (
+                            status.total_requests == selected_status.total_requests
+                            and (
+                                status.last_selected_time < selected_status.last_selected_time
+                                or (
+                                    status.last_selected_time == selected_status.last_selected_time
+                                    and index < selected_index
+                                )
+                            )
+                        )
+                    )
+                )
+            ):
+                selected = candidate
+
+        if selected is None:
+            return None
+
+        index, token, status = selected
+        status.current_weight -= total_weight
+        status.active_requests += 1
+        status.last_selected_time = current_time
+        self._current_index = (index + 1) % total_tokens
+        return token
+
     async def get_next_token(self, exclude_tokens: Optional[Set[str]] = None) -> Optional[str]:
         """
-        获取下一个可用的认证用户 Token（轮询算法）
+        获取下一个可用的认证用户 Token（可配置调度算法）
 
         Returns:
             可用的 Token 字符串，如果没有可用 Token 则返回 None
@@ -292,9 +429,10 @@ class TokenPool:
                 return None
 
             excluded = exclude_tokens or set()
+            current_time = time.time()
             total_tokens = len(self._user_tokens)
             start_index = self._current_index % total_tokens if total_tokens else 0
-            current_time = time.time()
+            candidate_tokens: List[Tuple[int, str, TokenStatus]] = []
 
             for offset in range(total_tokens):
                 index = (start_index + offset) % total_tokens
@@ -306,8 +444,26 @@ class TokenPool:
                 if status is None:
                     continue
                 if self._is_token_available(status, current_time):
-                    self._current_index = (index + 1) % total_tokens
-                    return token
+                    candidate_tokens.append((index, token, status))
+
+            if candidate_tokens:
+                if self.strategy == TOKEN_LOAD_BALANCE_ROUND_ROBIN:
+                    return self._select_round_robin(
+                        candidate_tokens,
+                        total_tokens,
+                        current_time,
+                    )
+                if self.strategy == TOKEN_LOAD_BALANCE_LEAST_LOADED:
+                    return self._select_least_loaded(
+                        candidate_tokens,
+                        total_tokens,
+                        current_time,
+                    )
+                return self._select_smooth_weighted(
+                    candidate_tokens,
+                    total_tokens,
+                    current_time,
+                )
 
             logger.warning("⚠️ 没有可用的认证用户 Token")
             return None
@@ -336,6 +492,7 @@ class TokenPool:
                 status = self.token_statuses[token]
                 status.total_requests += 1
                 status.successful_requests += 1
+                status.active_requests = max(0, status.active_requests - 1)
                 status.last_success_time = time.time()
                 status.failure_count = 0
                 status.cooldown_until = 0.0
@@ -348,6 +505,7 @@ class TokenPool:
                 status = self.token_statuses[token]
                 current_time = time.time()
                 status.total_requests += 1
+                status.active_requests = max(0, status.active_requests - 1)
                 status.failure_count += 1
                 status.last_failure_time = current_time
 
@@ -458,6 +616,7 @@ class TokenPool:
             unknown_count = sum(1 for s in self.token_statuses.values() if s.token_type == "unknown")
 
             status_info = {
+                "strategy": self.strategy,
                 "total_tokens": total_count,
                 "available_tokens": available_count,
                 "unavailable_tokens": total_count - available_count,
@@ -478,12 +637,17 @@ class TokenPool:
                     "is_available": status.is_available,
                     "failure_count": status.failure_count,
                     "cooldown_until": status.cooldown_until,
+                    "priority": status.priority,
+                    "selection_weight": self._priority_weight(status.priority),
+                    "active_requests": status.active_requests,
+                    "current_weight": status.current_weight,
                     "success_count": status.successful_requests,
                     "success_rate": f"{status.success_rate:.2%}",
                     "total_requests": status.total_requests,
                     "is_healthy": status.is_healthy,
                     "last_failure_time": status.last_failure_time,
-                    "last_success_time": status.last_success_time
+                    "last_success_time": status.last_success_time,
+                    "last_selected_time": status.last_selected_time,
                 })
 
             return status_info
@@ -603,7 +767,11 @@ class TokenPool:
 
         # 构建数据库中的 Token 映射
         db_tokens = {
-            record["token"]: (record["id"], record.get("token_type", "unknown"))
+            record["token"]: (
+                record["id"],
+                record.get("token_type", "unknown"),
+                int(record.get("priority", 0) or 0),
+            )
             for record in token_records
             if record.get("token_type") != "guest"  # 过滤 guest token
         }
@@ -622,25 +790,27 @@ class TokenPool:
             # 2. 添加新启用的 Token
             new_tokens_count = 0
             ordered_user_tokens: List[str] = []
-            for token_value, (token_id, token_type) in db_tokens.items():
+            for token_value, (token_id, token_type, priority) in db_tokens.items():
                 if token_type == "user":
                     ordered_user_tokens.append(token_value)
                 if token_value not in self.token_statuses:
                     self.token_statuses[token_value] = TokenStatus(
                         token=token_value,
                         token_id=token_id,
-                        token_type=token_type
+                        token_type=token_type,
+                        priority=priority,
                     )
                     self.token_id_map[token_value] = token_id
                     new_tokens_count += 1
 
             # 3. 更新现有 Token 的类型（如果数据库中有更新）
-            for token_value, (token_id, token_type) in db_tokens.items():
+            for token_value, (token_id, token_type, priority) in db_tokens.items():
                 if token_value in self.token_statuses:
                     status = self.token_statuses[token_value]
                     old_type = status.token_type
                     if old_type != token_type:
                         status.token_type = token_type
+                    status.priority = priority
 
             self._user_tokens = ordered_user_tokens
             if self._user_tokens:
@@ -670,7 +840,8 @@ def get_token_pool() -> Optional[TokenPool]:
 async def initialize_token_pool_from_db(
     provider: str = "zai",
     failure_threshold: int = 3,
-    recovery_timeout: int = 1800
+    recovery_timeout: int = 1800,
+    strategy: str = TOKEN_LOAD_BALANCE_SMOOTH_WEIGHTED,
 ) -> Optional[TokenPool]:
     """
     从数据库初始化全局 Token 池
@@ -696,7 +867,12 @@ async def initialize_token_pool_from_db(
     tokens = []
     if token_records:
         tokens = [
-            (record["id"], record["token"], record.get("token_type", "unknown"))
+            (
+                record["id"],
+                record["token"],
+                record.get("token_type", "unknown"),
+                int(record.get("priority", 0) or 0),
+            )
             for record in token_records
         ]
 
@@ -714,7 +890,12 @@ async def initialize_token_pool_from_db(
 
     # 始终创建 Token 池实例（即使为空）
     async with _pool_lock:
-        _token_pool = TokenPool(tokens, failure_threshold, recovery_timeout)
+        _token_pool = TokenPool(
+            tokens,
+            failure_threshold,
+            recovery_timeout,
+            strategy=strategy,
+        )
 
         if not tokens:
             logger.warning(f"⚠️ {provider} 没有有效的认证用户 Token，已创建空 Token 池")

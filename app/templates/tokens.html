@@ -117,6 +117,10 @@
 
                     <dl class="grid grid-cols-1 gap-4 sm:grid-cols-3 text-sm">
                         <div class="rounded-lg border border-gray-200 p-4">
+                            <dt class="font-medium text-gray-700">负载策略</dt>
+                            <dd class="mt-2 text-gray-900 font-medium break-all">{{ automation.load_balance_strategy }}</dd>
+                        </div>
+                        <div class="rounded-lg border border-gray-200 p-4">
                             <dt class="font-medium text-gray-700">Token 目录</dt>
                             <dd class="mt-2 rounded-md bg-gray-50 px-3 py-2 font-mono text-xs text-gray-700 break-all">
                                 {{ automation.import_source_dir or '未配置' }}
@@ -165,6 +169,10 @@
                     {% endif %}
 
                     <dl class="grid grid-cols-1 gap-4 sm:grid-cols-3 text-sm">
+                        <div class="rounded-lg border border-gray-200 p-4">
+                            <dt class="font-medium text-gray-700">负载策略</dt>
+                            <dd class="mt-2 text-gray-900 font-medium break-all">{{ automation.load_balance_strategy }}</dd>
+                        </div>
                         <div class="rounded-lg border border-gray-200 p-4">
                             <dt class="font-medium text-gray-700">维护间隔</dt>
                             <dd class="mt-2 text-gray-900 font-medium">{{ automation.maintenance_interval }} 秒</dd>
@@ -517,20 +525,25 @@
 
     // 监听验证按钮的完成事件
     document.body.addEventListener('htmx:afterSwap', function (evt) {
-        // 检查是否是验证按钮触发的事件
-        if (evt.detail.target && evt.detail.target.id && evt.detail.target.id.startsWith('token-row-')) {
-            // 从目标元素提取 token ID
-            const tokenId = evt.detail.target.id.replace('token-row-', '');
+        const target = evt.detail.target;
+        const triggerElt = evt.detail.requestConfig?.elt;
+        const requestPath = String(evt.detail.requestConfig?.path || '');
 
-            // 检查是否是验证操作（通过查看触发元素）
-            const triggerElt = evt.detail.requestConfig?.elt;
-            if (triggerElt && triggerElt.classList.contains('validate-token-btn')) {
-                showNotification(`✓ Token ID ${tokenId} 验证完成`, 'success');
-
-                // 同时刷新统计数据
-                htmx.trigger('body', 'statsRefresh');
-            }
+        if (!target || !target.id || !target.id.startsWith('token-row-')) {
+            return;
         }
+
+        if (!triggerElt || !triggerElt.classList.contains('validate-token-btn')) {
+            return;
+        }
+
+        if (!requestPath.includes('/admin/api/tokens/validate-single/')) {
+            return;
+        }
+
+        const tokenId = target.id.replace('token-row-', '');
+        showNotification(`✓ Token ID ${tokenId} 验证完成`, 'success');
+        htmx.trigger('body', 'statsRefresh');
     });
 
     document.body.addEventListener('tokenListRefresh', function () {

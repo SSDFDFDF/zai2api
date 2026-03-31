@@ -258,6 +258,20 @@ CONFIG_SECTIONS: tuple[ConfigSectionSpec, ...] = (
                 restart_required=True,
             ),
             ConfigFieldSpec(
+                key="TOKEN_LOAD_BALANCE_STRATEGY",
+                label="负载策略",
+                description="控制认证 Token 的分配方式：轮询、最少活跃请求优先，或平滑加权轮询。",
+                value_type="str",
+                default_value="smooth_weighted_round_robin",
+                input_type="select",
+                options=(
+                    "round_robin",
+                    "least_loaded",
+                    "smooth_weighted_round_robin",
+                ),
+                required=True,
+            ),
+            ConfigFieldSpec(
                 key="TOKEN_AUTO_IMPORT_ENABLED",
                 label="启用自动导入",
                 description="按固定周期扫描服务端目录并导入 Token。",

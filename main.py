@@ -121,7 +121,8 @@ async def lifespan(app: FastAPI):
     token_pool = await initialize_token_pool_from_db(
         provider="zai",
         failure_threshold=settings.TOKEN_FAILURE_THRESHOLD,
-        recovery_timeout=settings.TOKEN_RECOVERY_TIMEOUT
+        recovery_timeout=settings.TOKEN_RECOVERY_TIMEOUT,
+        strategy=settings.TOKEN_LOAD_BALANCE_STRATEGY,
     )
 
     if not token_pool and not settings.ANONYMOUS_MODE:

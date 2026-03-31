@@ -161,6 +161,15 @@ async def reload_settings():
         logger.info("[guest_session.reload] ANONYMOUS_MODE=false, closing existing guest session pool")
         await close_guest_session_pool()
 
+    try:
+        from app.utils.token_pool import get_token_pool
+
+        token_pool = get_token_pool()
+        if token_pool is not None:
+            await token_pool.set_strategy(settings.TOKEN_LOAD_BALANCE_STRATEGY)
+    except Exception:
+        logger.debug("更新 Token 池负载策略失败", exc_info=settings.DEBUG_LOGGING)
+
     logger.info(f"🔄 配置已热重载 (DEBUG_LOGGING={settings.DEBUG_LOGGING})")
 
 
