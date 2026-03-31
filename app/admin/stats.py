@@ -6,7 +6,10 @@ import os
 import time
 from typing import Any, Dict, Optional
 
-import psutil
+try:
+    import psutil
+except ImportError:
+    psutil = None
 
 from app.services.request_log_dao import RequestLogDAO, get_request_log_dao
 from app.services.token_dao import TokenDAO, get_token_dao
@@ -71,6 +74,8 @@ def format_uptime(total_seconds: int) -> str:
 
 def get_process_uptime() -> str:
     """获取当前进程运行时长。"""
+    if psutil is None:
+        return "未知"
     created_at = psutil.Process(os.getpid()).create_time()
     return format_uptime(int(time.time() - created_at))
 

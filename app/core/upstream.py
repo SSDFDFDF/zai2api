@@ -57,6 +57,8 @@ from app.core.openai_compat import (
     get_error_message,
     handle_error,
 )
+from app.core.resin_compat import apply_resin_account_header
+from app.core.upstream_urls import build_upstream_url, get_api_endpoint, get_upstream_base_url
 from app.models.schemas import OpenAIRequest
 from app.utils.fe_version import get_latest_fe_version
 from app.utils.logger import logger
@@ -97,11 +99,11 @@ class UpstreamClient:
     def __init__(self):
         self.name = "upstream"
         self.logger = logger
-        self.api_endpoint = settings.API_ENDPOINT
+        self.api_endpoint = get_api_endpoint()
 
         # 当前上游特定配置
-        self.base_url = "https://chat.z.ai"
-        self.auth_url = f"{self.base_url}/api/v1/auths/"
+        self.base_url = get_upstream_base_url()
+        self.auth_url = build_upstream_url("/api/v1/auths/")
 
         # 子模块
         self._http_clients = SharedHttpClients()
@@ -407,6 +409,7 @@ class UpstreamClient:
 
         headers = build_dynamic_headers(fe_version)
         headers["Authorization"] = f"Bearer {token}"
+        apply_resin_account_header(headers, token)
 
         client = self._get_shared_client()
         attempts = max(1, max_retries)
@@ -660,6 +663,7 @@ class UpstreamClient:
                 token = auth_info.get("token", "")
                 if token:
                     headers["Authorization"] = f"Bearer {token}"
+                    apply_resin_account_header(headers, token)
                 client = self._get_shared_client()
                 response = await client.get(
                     f"{self.base_url}/api/models", headers=headers, timeout=10.0

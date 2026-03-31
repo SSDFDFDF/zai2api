@@ -16,6 +16,7 @@ from urllib.parse import quote
 
 import httpx
 
+from app.core.resin_compat import apply_resin_account_header
 from app.core.httpx_errors import normalize_httpx_exception, normalize_httpx_response
 from app.utils.logger import logger, log_exception
 from app.core.config import settings
@@ -114,6 +115,7 @@ async def upload_file(
             "Sec-Fetch-Site": "same-origin",
             "Authorization": f"Bearer {token}",
         }
+        apply_resin_account_header(headers, token)
 
         upload_files = {"file": (filename, file_data, mime_type)}
         response = await client.post(upload_url, files=upload_files, headers=headers)

@@ -135,6 +135,7 @@ async def reload_settings():
     """热重载配置（重新加载环境变量并更新 settings 对象）"""
     from dotenv import load_dotenv
 
+    from app.core.openai import reset_upstream_client
     from app.core.config import settings
     from app.utils.guest_session_pool import close_guest_session_pool, get_guest_session_pool
     from app.utils.logger import setup_logger
@@ -161,6 +162,9 @@ async def reload_settings():
 
     # 重新初始化 logger（使用新的 DEBUG_LOGGING 配置）
     setup_logger(log_dir=DEFAULT_LOG_DIR, debug_mode=settings.DEBUG_LOGGING)
+
+    # 重建上游客户端单例，确保新的 API_ENDPOINT/base_url 立即生效。
+    await reset_upstream_client()
 
     if not settings.ANONYMOUS_MODE and get_guest_session_pool() is not None:
         logger.info("[guest_session.reload] ANONYMOUS_MODE=false, closing existing guest session pool")

@@ -67,6 +67,13 @@ CONFIG_SECTIONS: tuple[ConfigSectionSpec, ...] = (
                 wide=True,
             ),
             ConfigFieldSpec(
+                key="RESIN_COMPAT_ENABLED",
+                label="启用 Resin 兼容账号头",
+                description="为出站请求附加 X-Resin-Account，并使用上游 token 的稳定哈希值作为账号，便于 Resin 按同一 token 复用出口 IP。",
+                value_type="bool",
+                default_value=False,
+            ),
+            ConfigFieldSpec(
                 key="AUTH_TOKEN",
                 label="客户端认证密钥",
                 description="客户端访问本服务时使用的 Bearer Token。",
@@ -469,7 +476,6 @@ CONFIG_SECTIONS: tuple[ConfigSectionSpec, ...] = (
                 description="统一代理，支持 http://, https://, socks5:// 等格式。例如：http://127.0.0.1:10808 或 socks5://127.0.0.1:1080。",
                 value_type="str",
                 default_value="",
-                placeholder="http://127.0.0.1:10808",
                 wide=True,
             ),
         ),

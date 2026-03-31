@@ -8,6 +8,7 @@ from datetime import timedelta, datetime, timezone
 
 from app.models.db_models import Token
 from app.core.chat_cleanup import delete_chats_for_token, run_chat_cleanup
+from app.core.upstream_urls import build_upstream_url
 from app.services.token_dao import TokenDAO
 
 
@@ -39,7 +40,7 @@ async def test_delete_chats_for_token(mock_httpx_client, mock_fe_version):
     mock_httpx_client.assert_called_once()
     call_kwargs = mock_httpx_client.call_args.kwargs
     assert call_kwargs["method"] == "DELETE"
-    assert "https://chat.z.ai/api/v1/chats/" in call_kwargs["url"]
+    assert call_kwargs["url"] == build_upstream_url("/api/v1/chats/")
     assert call_kwargs["headers"]["Authorization"] == "Bearer test-token-123"
     assert call_kwargs["headers"]["Origin"] == "https://chat.z.ai"
     assert call_kwargs["headers"]["X-FE-Version"] == "1.0.0"
@@ -96,7 +97,7 @@ async def test_run_chat_cleanup(tmp_path, monkeypatch, mock_httpx_client, mock_f
 
     call_kwargs = mock_httpx_client.call_args.kwargs
     assert call_kwargs["method"] == "DELETE"
-    assert call_kwargs["url"] == "https://chat.z.ai/api/v1/chats/"
+    assert call_kwargs["url"] == build_upstream_url("/api/v1/chats/")
 
     # 验证数据库中上次清理时间是否已更新
     t1 = await dao.get_token_by_id(id1)

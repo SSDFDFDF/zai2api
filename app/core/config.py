@@ -2,9 +2,28 @@
 # -*- coding: utf-8 -*-
 
 import os
+from pathlib import Path
 from typing import Optional
 
 from pydantic_settings import BaseSettings
+from dotenv import dotenv_values
+
+
+_ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
+if _ENV_PATH.exists():
+    for _key, _value in dotenv_values(_ENV_PATH).items():
+        if _value is not None:
+            os.environ[_key] = _value
+            if _key == "HTTP_PROXY":
+                for _proxy_key in (
+                    "HTTP_PROXY",
+                    "http_proxy",
+                    "HTTPS_PROXY",
+                    "https_proxy",
+                    "ALL_PROXY",
+                    "all_proxy",
+                ):
+                    os.environ[_proxy_key] = _value
 
 
 class Settings(BaseSettings):
@@ -12,6 +31,9 @@ class Settings(BaseSettings):
 
     # API Configuration
     API_ENDPOINT: str = "https://chat.z.ai/api/v2/chat/completions"
+    RESIN_COMPAT_ENABLED: bool = (
+        os.getenv("RESIN_COMPAT_ENABLED", "false").lower() == "true"
+    )
     
     # Authentication
     AUTH_TOKEN: Optional[str] = os.getenv("AUTH_TOKEN")

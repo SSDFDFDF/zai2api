@@ -16,13 +16,14 @@ from app.core.config import settings
 from app.core.http_client import SharedHttpClients
 from app.core.headers import build_dynamic_headers as _build_dynamic_headers
 from app.core.httpx_errors import normalize_httpx_exception, normalize_httpx_response
+from app.core.resin_compat import apply_resin_account_header
+from app.core.upstream_urls import build_upstream_url
 from app.utils.fe_version import get_latest_fe_version
 from app.utils.logger import logger, log_exception
 from app.utils.utlis import mask_token
 
-
-AUTH_URL = "https://chat.z.ai/api/v1/auths/"
-CHATS_URL = "https://chat.z.ai/api/v1/chats/"
+AUTH_URL = "/api/v1/auths/"
+CHATS_URL = "/api/v1/chats/"
 
 
 def _decode_token_payload(token: str) -> Dict[str, Any]:
@@ -159,7 +160,7 @@ class GuestSessionPool:
                 headers = _build_dynamic_headers(fe_version)
 
                 client = self._http_clients.get_client()
-                response = await client.get(AUTH_URL, headers=headers)
+                response = await client.get(build_upstream_url(AUTH_URL), headers=headers)
 
                 if response.status_code != 200:
                     raise RuntimeError(
@@ -212,7 +213,7 @@ class GuestSessionPool:
                         normalize_httpx_exception(
                             exc,
                             method="GET",
-                            url=AUTH_URL,
+                            url=build_upstream_url(AUTH_URL),
                             context="guest_session.create",
                             attempt=attempt,
                         ),
@@ -235,10 +236,12 @@ class GuestSessionPool:
                 "Content-Type": "application/json",
             }
         )
+        apply_resin_account_header(headers, session.token)
 
         try:
             client = self._http_clients.get_client()
-            response = await client.delete(CHATS_URL, headers=headers)
+            chats_url = build_upstream_url(CHATS_URL)
+            response = await client.delete(chats_url, headers=headers)
 
             if response.status_code == 200:
                 logger.debug("已清理匿名会话聊天记录: %s", session.user_id)
@@ -251,7 +254,7 @@ class GuestSessionPool:
                     response.text,
                     content_type=response.headers.get("content-type"),
                     method="DELETE",
-                    url=CHATS_URL,
+                    url=chats_url,
                     context=f"guest_session.cleanup:{session.user_id}",
                 ),
             )
@@ -261,7 +264,7 @@ class GuestSessionPool:
                 normalize_httpx_exception(
                     exc,
                     method="DELETE",
-                    url=CHATS_URL,
+                    url=build_upstream_url(CHATS_URL),
                     context=f"guest_session.cleanup:{session.user_id}",
                 ),
                 exc_info=settings.DEBUG_LOGGING,
@@ -320,7 +323,7 @@ class GuestSessionPool:
                                 normalize_httpx_exception(
                                     result,
                                     method="GET",
-                                    url=AUTH_URL,
+                                    url=build_upstream_url(AUTH_URL),
                                     context="guest_session.create",
                                 )
                             )
@@ -468,7 +471,7 @@ class GuestSessionPool:
                         normalize_httpx_exception(
                             result,
                             method="GET",
-                            url=AUTH_URL,
+                            url=build_upstream_url(AUTH_URL),
                             context="guest_session.create",
                         )
                     )

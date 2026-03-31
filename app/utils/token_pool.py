@@ -19,6 +19,8 @@ from typing import Dict, List, Optional, Set, Tuple
 
 import httpx
 
+from app.core.resin_compat import apply_resin_account_header
+from app.core.upstream_urls import build_upstream_url
 from app.core.httpx_errors import normalize_httpx_exception
 from app.utils.logger import logger, log_exception
 from app.utils.utlis import mask_token
@@ -112,8 +114,6 @@ class TokenStatus:
 class ZAITokenValidator:
     """Z.AI Token 验证器（使用官方认证接口）"""
 
-    AUTH_URL = "https://chat.z.ai/api/v1/auths/"
-
     @staticmethod
     def _response_size_bytes(response: httpx.Response) -> int:
         content_length = response.headers.get("content-length")
@@ -122,9 +122,13 @@ class ZAITokenValidator:
         return len(response.content or b"")
 
     @staticmethod
+    def auth_url() -> str:
+        return build_upstream_url("/api/v1/auths/")
+
+    @staticmethod
     def get_headers(token: str) -> Dict[str, str]:
         """构建认证请求头"""
-        return {
+        headers = {
             "Accept": "*/*",
             "Accept-Language": "zh-CN,zh;q=0.9",
             "Authorization": f"Bearer {token}",
@@ -140,6 +144,8 @@ class ZAITokenValidator:
             "sec-ch-ua-mobile": "?0",
             "sec-ch-ua-platform": '"Windows"'
         }
+        apply_resin_account_header(headers, token)
+        return headers
 
     @classmethod
     async def validate_token(cls, token: str) -> Tuple[str, bool, Optional[str]]:
@@ -159,8 +165,9 @@ class ZAITokenValidator:
         masked_token = mask_token(token)
         try:
             async with httpx.AsyncClient(timeout=15.0, trust_env=False) as client:
+                auth_url = cls.auth_url()
                 response = await client.get(
-                    cls.AUTH_URL,
+                    auth_url,
                     headers=cls.get_headers(token)
                 )
 
@@ -183,7 +190,7 @@ class ZAITokenValidator:
                 normalize_httpx_exception(
                     exc,
                     method="GET",
-                    url=cls.AUTH_URL,
+                    url=cls.auth_url(),
                     context="token.validate",
                 ),
             )
@@ -194,7 +201,7 @@ class ZAITokenValidator:
                 normalize_httpx_exception(
                     exc,
                     method="GET",
-                    url=cls.AUTH_URL,
+                    url=cls.auth_url(),
                     context="token.validate",
                 ),
             )
@@ -205,7 +212,7 @@ class ZAITokenValidator:
                 normalize_httpx_exception(
                     e,
                     method="GET",
-                    url=cls.AUTH_URL,
+                    url=cls.auth_url(),
                     context="token.validate",
                 ),
             )

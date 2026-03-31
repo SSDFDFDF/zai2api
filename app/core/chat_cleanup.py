@@ -8,6 +8,8 @@ from typing import Optional
 from app.core.config import settings
 from app.core.headers import build_dynamic_headers
 from app.core.http_client import SharedHttpClients
+from app.core.resin_compat import apply_resin_account_header
+from app.core.upstream_urls import build_upstream_url
 from app.services.token_dao import TokenDAO, get_token_dao
 from app.utils.fe_version import get_latest_fe_version
 from app.utils.logger import logger
@@ -33,14 +35,16 @@ async def delete_chats_for_token(
     fe_version = await get_latest_fe_version()
     headers = build_dynamic_headers(fe_version)
     headers["Authorization"] = f"Bearer {token}"
+    apply_resin_account_header(headers, token)
     headers["Origin"] = "https://chat.z.ai"
     headers["Referer"] = "https://chat.z.ai/"
+    chats_url = build_upstream_url("/api/v1/chats/")
     
     started_at = time.perf_counter()
     try:
         response = await client.request(
             method="DELETE",
-            url="https://chat.z.ai/api/v1/chats/",
+            url=chats_url,
             headers=headers,
             json=None
         )

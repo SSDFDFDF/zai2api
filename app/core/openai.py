@@ -51,6 +51,14 @@ def get_upstream_client_if_ready() -> Optional[UpstreamClient]:
     return _upstream_client
 
 
+async def reset_upstream_client() -> None:
+    """Close and clear the cached upstream client singleton."""
+    global _upstream_client
+    if _upstream_client is not None:
+        await _upstream_client.close()
+    _upstream_client = None
+
+
 @router.get("/v1/models")
 async def list_models():
     """返回当前服务支持的模型列表（含能力声明）。"""

@@ -23,6 +23,7 @@ from app.core.file_upload import upload_file
 from app.utils.fe_version import get_latest_fe_version
 from app.utils.logger import logger, log_exception
 from app.utils.signature import generate_signature
+from app.core.resin_compat import apply_resin_account_header
 
 
 def _extract_image_url(part: Dict[str, Any]) -> str:
@@ -482,6 +483,7 @@ async def sign_request(
             "X-Signature": signature,
         }
     )
+    apply_resin_account_header(headers, token)
 
     # 构建完整的 URL query params（对齐浏览器指纹字段）
     now_iso = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.000Z")

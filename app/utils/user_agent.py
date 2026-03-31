@@ -8,23 +8,29 @@
 
 import random
 import re
-from typing import Dict, Optional, Tuple
-from fake_useragent import UserAgent
+from typing import Any, Dict, Optional, Tuple
+
+try:
+    from fake_useragent import UserAgent as _FakeUserAgent
+except ImportError:
+    _FakeUserAgent = None
 
 # 全局 UserAgent 实例（单例模式）
-_user_agent_instance: Optional[UserAgent] = None
+_user_agent_instance: Optional[Any] = None
 
 
-def get_user_agent_instance() -> UserAgent:
+def get_user_agent_instance() -> Any:
     """获取或创建 UserAgent 实例（单例模式）"""
     global _user_agent_instance
     if _user_agent_instance is None:
+        if _FakeUserAgent is None:
+            raise RuntimeError("fake_useragent is not installed")
         try:
             # 开启缓存以提高性能
-            _user_agent_instance = UserAgent(use_external_data=True, cache=True)
+            _user_agent_instance = _FakeUserAgent(use_external_data=True, cache=True)
         except Exception:
             # 如果外部数据加载失败，提供降级机制
-            _user_agent_instance = UserAgent(use_external_data=False)
+            _user_agent_instance = _FakeUserAgent(use_external_data=False)
     return _user_agent_instance
 
 
@@ -242,5 +248,4 @@ def get_dynamic_headers(
         headers.update(additional_headers)
 
     return headers
-
 
