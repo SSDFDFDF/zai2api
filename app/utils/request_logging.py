@@ -231,6 +231,19 @@ async def write_request_log(
         log_exception(logger, "Failed to write request log")
 
 
+def _openai_response_has_output(response: Dict[str, Any]) -> bool:
+    """Check whether a complete (non-stream) OpenAI response has visible output."""
+    choices = response.get("choices") if isinstance(response, dict) else None
+    if not choices:
+        return False
+    message = choices[0].get("message") or {}
+    if message.get("content") or message.get("reasoning_content"):
+        return True
+    if message.get("tool_calls"):
+        return True
+    return False
+
+
 def _openai_payload_has_output(payload: Dict[str, Any]) -> bool:
     """Treat only visible content/tool deltas as first-token output."""
     choice = ((payload.get("choices") or [{}])[0]) if isinstance(payload, dict) else {}
@@ -267,6 +280,7 @@ async def wrap_openai_stream_with_logging(
     status_code = 200
     error_message: Optional[str] = None
     first_token_time = 0.0
+    has_output = False
     usage = _empty_usage()
 
     try:
@@ -290,8 +304,10 @@ async def wrap_openai_stream_with_logging(
                     status_code = _coerce_int(error.get("code"), 500)
                     continue
 
-                if not first_token_time and _openai_payload_has_output(payload):
-                    first_token_time = max(0.0, time.perf_counter() - started_at)
+                if _openai_payload_has_output(payload):
+                    has_output = True
+                    if not first_token_time:
+                        first_token_time = max(0.0, time.perf_counter() - started_at)
 
                 if payload.get("usage"):
                     usage = _merge_openai_usage(
@@ -306,6 +322,9 @@ async def wrap_openai_stream_with_logging(
         error_message = str(exc)
         raise
     finally:
+        if success and not has_output:
+            success = False
+            error_message = error_message or "Empty response: no content in stream"
         await write_request_log(
             provider=provider,
             model=model,

@@ -27,6 +27,7 @@ from app.core.openai_compat import resolve_http_error_status
 from app.core.upstream import UpstreamClient
 from app.utils.logger import logger
 from app.utils.request_logging import (
+    _openai_response_has_output,
     extract_openai_usage,
     wrap_openai_stream_with_logging,
     write_request_log,
@@ -175,21 +176,28 @@ async def chat_completions(
     # 非流式响应
     if isinstance(result, dict):
         usage = extract_openai_usage(result)
+        has_error = "error" in result
+        is_empty = not _openai_response_has_output(result)
         await write_request_log(
             provider="zai",
             model=body.model,
             source_info=source_info,
             auth_token=bearer_token,
             upstream_auth_token=upstream_auth_token,
-            success="error" not in result,
+            success=not has_error and not is_empty,
             started_at=started_at,
-            status_code=200 if "error" not in result else 500,
+            status_code=200 if not has_error else 500,
             input_tokens=usage["input_tokens"],
             output_tokens=usage["output_tokens"],
             cache_creation_tokens=usage["cache_creation_tokens"],
             cache_read_tokens=usage["cache_read_tokens"],
             total_tokens=usage["total_tokens"],
-            error_message=(result.get("error") or {}).get("message") if isinstance(result, dict) else None,
+            error_message=(
+                (result.get("error") or {}).get("message")
+                if has_error
+                else "Empty response: no content in choices" if is_empty
+                else None
+            ),
         )
         return JSONResponse(content=result)
 
