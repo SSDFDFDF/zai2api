@@ -64,7 +64,8 @@ from app.utils.fe_version import get_latest_fe_version
 from app.utils.logger import logger
 from app.utils.token_pool import get_token_pool
 from app.utils.guest_session_pool import get_guest_session_pool
-from app.utils.request_logging import _openai_response_has_output, _sse_chunk_has_output
+from app.utils.request_logging import _openai_response_has_output, _sse_chunk_has_output, write_request_log
+from app.utils.request_source import RequestSourceInfo
 
 
 def generate_uuid() -> str:
@@ -1357,6 +1358,21 @@ class UpstreamClient:
                             settings.EMPTY_RESPONSE_MAX_RETRIES,
                             current_token[:20] if current_token else "guest",
                         )
+                        await write_request_log(
+                            provider="zai",
+                            model=str(transformed.get("model") or ""),
+                            source_info=RequestSourceInfo(
+                                source="upstream", protocol="openai",
+                                client_name="retry", endpoint="/v1/chat/completions",
+                                user_agent="",
+                            ),
+                            auth_token=None,
+                            upstream_auth_token=current_token or None,
+                            success=False,
+                            started_at=time.perf_counter(),
+                            status_code=200,
+                            error_message="Empty response: no content in choices",
+                        )
                         if self._is_guest_auth(transformed):
                             guest_user_id = str(
                                 transformed.get("guest_user_id")
@@ -1683,6 +1699,21 @@ class UpstreamClient:
                         attempt + 1, max_attempts,
                         empty_retries + 1, settings.EMPTY_RESPONSE_MAX_RETRIES,
                         current_token[:20] if current_token else "guest",
+                    )
+                    await write_request_log(
+                        provider="zai",
+                        model=str(transformed.get("model") or ""),
+                        source_info=RequestSourceInfo(
+                            source="upstream", protocol="openai",
+                            client_name="retry", endpoint="/v1/chat/completions",
+                            user_agent="",
+                        ),
+                        auth_token=None,
+                        upstream_auth_token=current_token or None,
+                        success=False,
+                        started_at=time.perf_counter(),
+                        status_code=200,
+                        error_message="Empty stream: no content in response",
                     )
                     if self._is_guest_auth(transformed):
                         guest_user_id = str(
