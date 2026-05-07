@@ -245,6 +245,23 @@ def _openai_response_has_output(response: Dict[str, Any]) -> bool:
     return False
 
 
+def _sse_chunk_has_output(chunk_text: str) -> bool:
+    """Check whether a formatted SSE chunk string has visible output content."""
+    for line in chunk_text.splitlines():
+        if not line.startswith("data: "):
+            continue
+        payload_text = line[6:].strip()
+        if not payload_text or payload_text == "[DONE]":
+            continue
+        try:
+            payload = json.loads(payload_text)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            return _openai_payload_has_output(payload)
+    return False
+
+
 def _openai_payload_has_output(payload: Dict[str, Any]) -> bool:
     """Treat only visible content/tool deltas as first-token output."""
     choice = ((payload.get("choices") or [{}])[0]) if isinstance(payload, dict) else {}

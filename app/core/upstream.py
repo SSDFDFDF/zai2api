@@ -64,7 +64,7 @@ from app.utils.fe_version import get_latest_fe_version
 from app.utils.logger import logger
 from app.utils.token_pool import get_token_pool
 from app.utils.guest_session_pool import get_guest_session_pool
-from app.utils.request_logging import _openai_response_has_output
+from app.utils.request_logging import _openai_response_has_output, _sse_chunk_has_output
 
 
 def generate_uuid() -> str:
@@ -1647,9 +1647,74 @@ class UpstreamClient:
                         parsed_error_message,
                     )
 
-                await self._commit_session_if_needed(transformed)
                 chat_id = transformed["chat_id"]
                 model = transformed["model"]
+
+                # Peek at stream to detect empty response before committing
+                response_iter = self._response_handler.handle_stream_response(
+                    response,
+                    chat_id,
+                    model,
+                    started_at=getattr(request, "started_at", None),
+                )
+                buffer: list[str] = []
+                found_output = False
+                try:
+                    remaining = _remaining_timeout()
+                    if remaining > 0:
+                        async with asyncio.timeout(max(0.1, remaining)):
+                            async for chunk in response_iter:
+                                buffer.append(chunk)
+                                if _sse_chunk_has_output(chunk):
+                                    found_output = True
+                                    break
+                except (asyncio.TimeoutError, Exception):
+                    pass
+
+                if not found_output:
+                    await response.aclose()
+                    self.logger.warning(
+                        "流式空回响应 (attempt %s/%s), token: %s...",
+                        attempt + 1, max_attempts,
+                        current_token[:20] if current_token else "guest",
+                    )
+                    if self._is_guest_auth(transformed):
+                        guest_user_id = str(
+                            transformed.get("guest_user_id")
+                            or transformed.get("user_id")
+                            or ""
+                        )
+                        if guest_user_id:
+                            excluded_guest_user_ids.add(guest_user_id)
+                    elif current_token:
+                        excluded_tokens.add(current_token)
+                        await self.mark_token_failure(
+                            current_token,
+                            Exception("Empty stream: no content"),
+                        )
+                    await self._release_guest_session(transformed)
+                    if attempt + 1 < max_attempts:
+                        if self._is_guest_auth(transformed):
+                            transformed = await self._refresh_guest_request(
+                                request, attempt, excluded_tokens,
+                                excluded_guest_user_ids, transformed,
+                            )
+                        else:
+                            transformed = await self._refresh_authenticated_request(
+                                request, attempt, excluded_tokens,
+                                excluded_guest_user_ids,
+                            )
+                        current_token = str(transformed.get("token") or "")
+                        continue
+                    return {
+                        "error": {
+                            "message": "Empty stream: no content in response",
+                            "type": "stream_error",
+                            "code": 502,
+                        }
+                    }
+
+                await self._commit_session_if_needed(transformed)
 
                 async def stream_generator() -> AsyncGenerator[str, None]:
                     success = False
@@ -1684,12 +1749,9 @@ class UpstreamClient:
                             )
 
                         async with asyncio.timeout(remaining):
-                            async for chunk in self._response_handler.handle_stream_response(
-                                response,
-                                chat_id,
-                                model,
-                                started_at=getattr(request, "started_at", None),
-                            ):
+                            for chunk in buffer:
+                                yield chunk
+                            async for chunk in response_iter:
                                 yield chunk
                         success = True
                     except asyncio.TimeoutError as e:
