@@ -13,6 +13,7 @@ from app.services.request_log_dao import get_request_log_dao
 from app.utils.format import format_compact_number
 from app.utils.logger import logger, log_exception
 from app.utils.request_source import RequestSourceInfo
+from app.utils.token_pool import get_token_pool
 from app.utils.utlis import mask_token
 
 CACHE_CREATION_FLOOR = 1024
@@ -325,6 +326,12 @@ async def wrap_openai_stream_with_logging(
         if success and not has_output:
             success = False
             error_message = error_message or "Empty response: no content in stream"
+            token_pool = get_token_pool()
+            if token_pool and upstream_auth_token:
+                await token_pool.record_token_failure(
+                    upstream_auth_token,
+                    Exception(error_message),
+                )
         await write_request_log(
             provider=provider,
             model=model,

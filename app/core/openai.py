@@ -26,6 +26,7 @@ from app.models.schemas import (
 from app.core.openai_compat import resolve_http_error_status
 from app.core.upstream import UpstreamClient
 from app.utils.logger import logger
+from app.utils.token_pool import get_token_pool
 from app.utils.request_logging import (
     _openai_response_has_output,
     extract_openai_usage,
@@ -199,6 +200,13 @@ async def chat_completions(
                 else None
             ),
         )
+        if is_empty:
+            token_pool = get_token_pool()
+            if token_pool and upstream_auth_token:
+                await token_pool.record_token_failure(
+                    upstream_auth_token,
+                    Exception("Empty response: no content in choices"),
+                )
         return JSONResponse(content=result)
 
     # 不应该到达这里
