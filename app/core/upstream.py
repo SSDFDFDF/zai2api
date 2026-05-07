@@ -1335,7 +1335,6 @@ class UpstreamClient:
                             str(transformed.get("token") or "") or None,
                         )
 
-                    await self._commit_session_if_needed(transformed)
                     try:
                         result = await self._response_handler.handle_non_stream_response(
                             response,
@@ -1350,7 +1349,9 @@ class UpstreamClient:
                     # 空回检测：上游返回 200 但 choices 无实际内容
                     if not _openai_response_has_output(result):
                         self.logger.warning(
-                            "空回响应, token: %s...",
+                            "空回响应 (attempt %s/%s), token: %s...",
+                            attempt + 1,
+                            max_attempts,
                             current_token[:20] if current_token else "guest",
                         )
                         if self._is_guest_auth(transformed):
@@ -1361,23 +1362,33 @@ class UpstreamClient:
                             )
                             if guest_user_id:
                                 excluded_guest_user_ids.add(guest_user_id)
-                        else:
-                            if current_token:
-                                excluded_tokens.add(current_token)
-                                await self.mark_token_failure(
-                                    current_token,
-                                    Exception("Empty response: no content in choices"),
-                                )
-                        if attempt + 1 < max_attempts:
-                            transformed = await self._refresh_authenticated_request(
-                                request,
-                                attempt,
-                                excluded_tokens,
-                                excluded_guest_user_ids,
+                        elif current_token:
+                            excluded_tokens.add(current_token)
+                            await self.mark_token_failure(
+                                current_token,
+                                Exception("Empty response: no content in choices"),
                             )
+                        if attempt + 1 < max_attempts:
+                            if self._is_guest_auth(transformed):
+                                transformed = await self._refresh_guest_request(
+                                    request,
+                                    attempt,
+                                    excluded_tokens,
+                                    excluded_guest_user_ids,
+                                    transformed,
+                                )
+                            else:
+                                transformed = await self._refresh_authenticated_request(
+                                    request,
+                                    attempt,
+                                    excluded_tokens,
+                                    excluded_guest_user_ids,
+                                )
                             continue
-                        # 所有重试已耗尽，返回空结果
+                        # 所有重试已耗尽
                         return result, current_token or None
+
+                    await self._commit_session_if_needed(transformed)
 
                     if not self._is_guest_auth(transformed):
                         if current_token:

@@ -179,13 +179,40 @@ async def chat_completions(
         usage = extract_openai_usage(result)
         has_error = "error" in result
         is_empty = not _openai_response_has_output(result)
+
+        if is_empty:
+            error_message = "Empty response: no content in choices"
+            await write_request_log(
+                provider="zai",
+                model=body.model,
+                source_info=source_info,
+                auth_token=bearer_token,
+                upstream_auth_token=upstream_auth_token,
+                success=False,
+                started_at=started_at,
+                status_code=502,
+                input_tokens=usage["input_tokens"],
+                output_tokens=usage["output_tokens"],
+                cache_creation_tokens=usage["cache_creation_tokens"],
+                cache_read_tokens=usage["cache_read_tokens"],
+                total_tokens=usage["total_tokens"],
+                error_message=error_message,
+            )
+            token_pool = get_token_pool()
+            if token_pool and upstream_auth_token:
+                await token_pool.record_token_failure(
+                    upstream_auth_token,
+                    Exception(error_message),
+                )
+            raise UpstreamError(message=error_message)
+
         await write_request_log(
             provider="zai",
             model=body.model,
             source_info=source_info,
             auth_token=bearer_token,
             upstream_auth_token=upstream_auth_token,
-            success=not has_error and not is_empty,
+            success=not has_error,
             started_at=started_at,
             status_code=200 if not has_error else 500,
             input_tokens=usage["input_tokens"],
@@ -196,17 +223,9 @@ async def chat_completions(
             error_message=(
                 (result.get("error") or {}).get("message")
                 if has_error
-                else "Empty response: no content in choices" if is_empty
                 else None
             ),
         )
-        if is_empty:
-            token_pool = get_token_pool()
-            if token_pool and upstream_auth_token:
-                await token_pool.record_token_failure(
-                    upstream_auth_token,
-                    Exception("Empty response: no content in choices"),
-                )
         return JSONResponse(content=result)
 
     # 不应该到达这里
