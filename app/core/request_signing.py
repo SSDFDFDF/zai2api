@@ -368,6 +368,9 @@ def build_upstream_body(
             "auto_web_search": auto_web_search,
             "preview_mode": True,
             "flags": flags,
+            "vlm_tools_enable": False,
+            "vlm_web_search_enable": False,
+            "vlm_website_mode": False,
             "enable_thinking": enable_thinking,
         },
         "background_tasks": {

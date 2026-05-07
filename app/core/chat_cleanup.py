@@ -120,7 +120,7 @@ async def run_chat_cleanup(
                 logger.debug("清理 Token 的会话失败: id=%s", token_id)
                 
             # 间隔2秒，避免并发过高或被风控
-            await asyncio.sleep(2.0)
+            await asyncio.sleep(3.0)
     finally:
         await clients.close()
 

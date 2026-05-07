@@ -69,6 +69,7 @@ def build_dynamic_headers(fe_version: str, chat_id: str = "") -> Dict[str, str]:
         "User-Agent": user_agent,
         "Accept-Language": "zh-CN",
         "X-FE-Version": fe_version,
+        "X-Region": "overseas",
         "Origin": "https://chat.z.ai",
         "Sec-Fetch-Dest": "empty",
         "Sec-Fetch-Mode": "cors",

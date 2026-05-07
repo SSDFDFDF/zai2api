@@ -24,6 +24,8 @@ _login_attempts: dict[str, list[float]] = {}
 # ── Session 吊销黑名单（进程内存，重启后清空）─────────────────────────────
 # 键: session token 原始字符串, 值: 吊销时间戳
 _revoked_sessions: dict[str, float] = {}
+_last_prune_time: float = 0.0
+_PRUNE_INTERVAL = 60.0
 
 
 def _sign_payload(payload: str) -> str:
@@ -121,6 +123,13 @@ def verify_session(session_token: Optional[str]) -> bool:
     """
     if not session_token:
         return False
+
+    # 惰性清理：距上次清理超过 _PRUNE_INTERVAL 秒时顺便执行
+    now = _now()
+    global _last_prune_time
+    if now - _last_prune_time > _PRUNE_INTERVAL:
+        _prune_revoked_sessions()
+        _last_prune_time = now
 
     # 检查吊销黑名单
     if session_token in _revoked_sessions:
