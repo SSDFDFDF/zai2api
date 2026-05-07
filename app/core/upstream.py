@@ -64,6 +64,7 @@ from app.utils.fe_version import get_latest_fe_version
 from app.utils.logger import logger
 from app.utils.token_pool import get_token_pool
 from app.utils.guest_session_pool import get_guest_session_pool
+from app.utils.request_logging import _openai_response_has_output
 
 
 def generate_uuid() -> str:
@@ -1344,14 +1345,47 @@ class UpstreamClient:
                     finally:
                         await self._release_guest_session(transformed)
 
+                    current_token = str(transformed.get("token") or "")
+
+                    # 空回检测：上游返回 200 但 choices 无实际内容
+                    if not _openai_response_has_output(result):
+                        self.logger.warning(
+                            "空回响应, token: %s...",
+                            current_token[:20] if current_token else "guest",
+                        )
+                        if self._is_guest_auth(transformed):
+                            guest_user_id = str(
+                                transformed.get("guest_user_id")
+                                or transformed.get("user_id")
+                                or ""
+                            )
+                            if guest_user_id:
+                                excluded_guest_user_ids.add(guest_user_id)
+                        else:
+                            if current_token:
+                                excluded_tokens.add(current_token)
+                                await self.mark_token_failure(
+                                    current_token,
+                                    Exception("Empty response: no content in choices"),
+                                )
+                        if attempt + 1 < max_attempts:
+                            transformed = await self._refresh_authenticated_request(
+                                request,
+                                attempt,
+                                excluded_tokens,
+                                excluded_guest_user_ids,
+                            )
+                            continue
+                        # 所有重试已耗尽，返回空结果
+                        return result, current_token or None
+
                     if not self._is_guest_auth(transformed):
-                        current_token = str(transformed.get("token") or "")
                         if current_token:
                             token_pool = get_token_pool()
                             if token_pool:
                                 await token_pool.record_token_success(current_token)
 
-                    return result, str(transformed.get("token") or "") or None
+                    return result, current_token or None
 
         except Exception as e:
             self.logger.error(
