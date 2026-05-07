@@ -165,6 +165,8 @@ class Settings(BaseSettings):
     CHAT_TOTAL_TIMEOUT: float = float(os.getenv("CHAT_TOTAL_TIMEOUT", "300.0"))
     # 流式请求端到端总超时（含所有重试）
     HTTP_STREAM_TOTAL_TIMEOUT: float = float(os.getenv("HTTP_STREAM_TOTAL_TIMEOUT", "600.0"))
+    # 空回响应最大重试次数
+    EMPTY_RESPONSE_MAX_RETRIES: int = int(os.getenv("EMPTY_RESPONSE_MAX_RETRIES", "10"))
 
     # Proxy Configuration (统一网络代理, 支持 HTTP/HTTPS/SOCKS5)
     HTTP_PROXY: Optional[str] = os.getenv("HTTP_PROXY")  # 统一代理, 默认使用本地 10808 端口

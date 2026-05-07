@@ -1200,6 +1200,7 @@ class UpstreamClient:
             client = self._get_shared_client()
             excluded_tokens: Set[str] = set()
             excluded_guest_user_ids: Set[str] = set()
+            empty_retries = 0
 
             async with asyncio.timeout(settings.CHAT_TOTAL_TIMEOUT):
                 for attempt in range(max_attempts):
@@ -1349,9 +1350,11 @@ class UpstreamClient:
                     # 空回检测：上游返回 200 但 choices 无实际内容
                     if not _openai_response_has_output(result):
                         self.logger.warning(
-                            "空回响应 (attempt %s/%s), token: %s...",
+                            "空回响应 (attempt %s/%s, empty_retry %s/%s), token: %s...",
                             attempt + 1,
                             max_attempts,
+                            empty_retries + 1,
+                            settings.EMPTY_RESPONSE_MAX_RETRIES,
                             current_token[:20] if current_token else "guest",
                         )
                         if self._is_guest_auth(transformed):
@@ -1368,7 +1371,8 @@ class UpstreamClient:
                                 current_token,
                                 Exception("Empty response: no content in choices"),
                             )
-                        if attempt + 1 < max_attempts:
+                        if attempt + 1 < max_attempts and empty_retries < settings.EMPTY_RESPONSE_MAX_RETRIES:
+                            empty_retries += 1
                             if self._is_guest_auth(transformed):
                                 transformed = await self._refresh_guest_request(
                                     request,
@@ -1430,6 +1434,7 @@ class UpstreamClient:
         excluded_tokens: Set[str] = set()
         excluded_guest_user_ids: Set[str] = set()
         current_token = str(transformed.get("token") or "")
+        empty_retries = 0
 
         client = self._get_shared_stream_client()
         loop = asyncio.get_running_loop()
@@ -1674,8 +1679,9 @@ class UpstreamClient:
                 if not found_output:
                     await response.aclose()
                     self.logger.warning(
-                        "流式空回响应 (attempt %s/%s), token: %s...",
+                        "流式空回响应 (attempt %s/%s, empty_retry %s/%s), token: %s...",
                         attempt + 1, max_attempts,
+                        empty_retries + 1, settings.EMPTY_RESPONSE_MAX_RETRIES,
                         current_token[:20] if current_token else "guest",
                     )
                     if self._is_guest_auth(transformed):
@@ -1693,7 +1699,8 @@ class UpstreamClient:
                             Exception("Empty stream: no content"),
                         )
                     await self._release_guest_session(transformed)
-                    if attempt + 1 < max_attempts:
+                    if attempt + 1 < max_attempts and empty_retries < settings.EMPTY_RESPONSE_MAX_RETRIES:
+                        empty_retries += 1
                         if self._is_guest_auth(transformed):
                             transformed = await self._refresh_guest_request(
                                 request, attempt, excluded_tokens,
