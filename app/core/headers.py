@@ -4,7 +4,13 @@
 """统一浏览器 headers 生成。
 
 提供 build_dynamic_headers() 作为唯一入口。
-所有 header 字段和参数均保留。
+
+⚠️ 此处只生成真实浏览器同源 fetch 请求中实际带的最小集合，避免被阿里云 ESA/WAF
+按"非浏览器指纹"判别拦截（参见 chat.z.ai 抓包对比）。
+- 不发 Origin（同源请求浏览器不发）
+- 不发 Cache-Control / Pragma / Connection（fetch 不发）
+- 不发 Sec-Fetch-*（fetch 自身管理，写死反而成为指纹）
+- 不发 Referer 路径（chat.z.ai 前端的 referrer policy 让其为空）
 """
 
 import random
@@ -14,19 +20,17 @@ from app.utils.user_agent import get_random_user_agent
 
 
 def build_dynamic_headers(fe_version: str, chat_id: str = "") -> Dict[str, str]:
-    """生成上游请求所需的动态浏览器 headers。
-
-    随机选择浏览器类型（chrome/edge/firefox/safari），根据 User-Agent 动态生成
-    对应的 sec-ch-ua 等安全相关头。
+    """生成上游请求所需的最小浏览器 headers。
 
     Args:
         fe_version: 前端版本号，填充到 X-FE-Version header。
-        chat_id: 当前对话 ID，非空时设置 Referer 为对话页。
+        chat_id: 当前对话 ID（保留参数以兼容现有调用方，不再用于构造 Referer）。
 
     Returns:
-        包含所有必要浏览器 headers 的字典。
-        Firefox 不包含 sec-ch-ua 相关头（浏览器行为对齐）。
+        与真实浏览器同源 fetch 一致的最小 header 集合。
+        Firefox UA 不带 sec-ch-ua 系列；Chromium 系带。
     """
+    del chat_id  # 兼容旧签名；真实浏览器同源请求里 Referer 为空，不再据此拼接
     browser_choices = ["chrome", "chrome", "chrome", "edge", "edge", "firefox", "safari"]
     browser_type = random.choice(browser_choices)
     user_agent = get_random_user_agent(browser_type)
@@ -60,30 +64,26 @@ def build_dynamic_headers(fe_version: str, chat_id: str = "") -> Dict[str, str]:
             f'"Google Chrome";v="{chrome_version}"'
         )
 
+    if "Windows" in user_agent:
+        platform = '"Windows"'
+    elif "Macintosh" in user_agent or "Mac OS X" in user_agent:
+        platform = '"macOS"'
+    elif "Linux" in user_agent:
+        platform = '"Linux"'
+    else:
+        platform = '"Windows"'
+
     headers: Dict[str, str] = {
         "Content-Type": "application/json",
-        "Accept": "*/*",
-        "Connection": "keep-alive",
-        "Cache-Control": "no-cache",
-        "Pragma": "no-cache",
         "User-Agent": user_agent,
-        "Accept-Language": "zh-CN",
+        "Accept-Language": "en-US",
         "X-FE-Version": fe_version,
         "X-Region": "overseas",
-        "Origin": "https://chat.z.ai",
-        "Sec-Fetch-Dest": "empty",
-        "Sec-Fetch-Mode": "cors",
-        "Sec-Fetch-Site": "same-origin",
     }
 
     if sec_ch_ua:
         headers["sec-ch-ua"] = sec_ch_ua
         headers["sec-ch-ua-mobile"] = "?0"
-        headers["sec-ch-ua-platform"] = '"Windows"'
-
-    if chat_id:
-        headers["Referer"] = f"https://chat.z.ai/c/{chat_id}"
-    else:
-        headers["Referer"] = "https://chat.z.ai/"
+        headers["sec-ch-ua-platform"] = platform
 
     return headers
