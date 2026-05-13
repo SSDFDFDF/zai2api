@@ -332,6 +332,7 @@ def build_upstream_body(
     temperature: Optional[float],
     max_tokens: Optional[int],
     parent_message_id: Optional[str] = None,
+    captcha_verify_param: Optional[str] = None,
 ) -> Dict[str, Any]:
     """构建发送到上游的请求 JSON body。
 
@@ -392,6 +393,10 @@ def build_upstream_body(
         "current_user_message_id": str(uuid.uuid4()),
         "current_user_message_parent_id": parent_message_id,
     }
+
+    # Captcha 验证参数
+    if captcha_verify_param:
+        body["captcha_verify_param"] = captcha_verify_param
 
     # 只在有图片时才包含 files 字段
     if files:

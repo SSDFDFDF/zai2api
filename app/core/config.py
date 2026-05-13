@@ -168,6 +168,22 @@ class Settings(BaseSettings):
     # 空回响应最大重试次数
     EMPTY_RESPONSE_MAX_RETRIES: int = int(os.getenv("EMPTY_RESPONSE_MAX_RETRIES", "10"))
 
+    # Captcha Service Configuration
+    # 是否需要 captcha_verify_param（关闭后主服务不再调用 captcha 服务）
+    CAPTCHA_ENABLED: bool = (
+        os.getenv("CAPTCHA_ENABLED", "true").lower() == "true"
+    )
+    # Captcha token 服务的地址（独立部署时改为实际 IP:Port）
+    CAPTCHA_SERVICE_URL: str = os.getenv(
+        "CAPTCHA_SERVICE_URL", "http://127.0.0.1:9000"
+    )
+    # 调用 captcha 服务的超时时间（秒），包含浏览器生成 token 的时间
+    CAPTCHA_SERVICE_TIMEOUT: float = float(
+        os.getenv("CAPTCHA_SERVICE_TIMEOUT", "18.0")
+    )
+    # captcha 验证失败时最多重试次数（每次重试会重新获取 token）
+    CAPTCHA_MAX_RETRIES: int = int(os.getenv("CAPTCHA_MAX_RETRIES", "3"))
+
     # Proxy Configuration (统一网络代理, 支持 HTTP/HTTPS/SOCKS5)
     HTTP_PROXY: Optional[str] = os.getenv("HTTP_PROXY")  # 统一代理, 默认使用本地 10808 端口
 

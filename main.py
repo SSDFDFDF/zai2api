@@ -163,6 +163,16 @@ async def lifespan(app: FastAPI):
         )
 
     await warmup_upstream_client()
+
+    if settings.CAPTCHA_ENABLED:
+        from app.core.captcha_client import create_captcha_client
+
+        create_captcha_client(
+            service_url=settings.CAPTCHA_SERVICE_URL,
+            timeout=settings.CAPTCHA_SERVICE_TIMEOUT,
+        )
+        logger.info("captcha client initialized")
+
     await start_token_automation_scheduler()
 
     # Start async log writer
@@ -214,6 +224,11 @@ async def lifespan(app: FastAPI):
     upstream_client = get_upstream_client_if_ready()
     if upstream_client:
         await upstream_client.close()
+
+    if settings.CAPTCHA_ENABLED:
+        from app.core.captcha_client import close_captcha_client
+
+        await close_captcha_client()
 
     logger.info("🔄 正在停止 async log writer...")
     from app.services.log_writer import get_log_writer
