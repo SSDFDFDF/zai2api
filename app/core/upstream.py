@@ -451,11 +451,21 @@ class UpstreamClient:
                             "[chat] pre-created chat_id=%s", chat_id
                         )
                         return chat_id
+                trace_id = (
+                    resp.headers.get("eagleid")
+                    or resp.headers.get("x-trace-id")
+                    or resp.headers.get("cf-ray")
+                    or "-"
+                )
                 self.logger.warning(
-                    "[chat] pre-create failed: HTTP %s (attempt %s/%s)",
+                    "[chat] pre-create failed: HTTP %s (attempt %s/%s) "
+                    "server=%s trace=%s body=%r",
                     resp.status_code,
                     attempt + 1,
                     attempts,
+                    resp.headers.get("server", "-"),
+                    trace_id,
+                    resp.text[:200],
                 )
             except Exception as e:
                 self.logger.warning(
