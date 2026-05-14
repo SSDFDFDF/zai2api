@@ -18,6 +18,7 @@ import base64
 import json
 import logging
 import os
+import random
 import time
 from contextlib import asynccontextmanager
 from typing import Dict, Optional
@@ -39,6 +40,30 @@ CAPTCHA_PORT = int(os.getenv("CAPTCHA_PORT", "9000"))
 CAPTCHA_HEADLESS = os.getenv("CAPTCHA_HEADLESS", "true").lower() == "true"
 CAPTCHA_TOKEN_TIMEOUT = float(os.getenv("CAPTCHA_TOKEN_TIMEOUT", "15.0"))
 CAPTCHA_PAGE_IDLE_TTL = float(os.getenv("CAPTCHA_PAGE_IDLE_TTL", "300"))
+
+
+# Stealth init script — hide automation signals so Aliyun silent-verify doesn't
+# fall back to the slider puzzle (which a headless browser can't solve).
+_STEALTH_INIT_SCRIPT = r"""
+Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+Object.defineProperty(navigator, 'languages', { get: () => ['zh-CN', 'zh', 'en'] });
+Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
+Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
+window.chrome = { runtime: {}, loadTimes: function(){}, csi: function(){}, app: {} };
+const _origPermQuery = window.navigator.permissions && window.navigator.permissions.query;
+if (_origPermQuery) {
+    window.navigator.permissions.query = (p) => p.name === 'notifications'
+        ? Promise.resolve({ state: Notification.permission })
+        : _origPermQuery(p);
+}
+const _origGetParam = WebGLRenderingContext.prototype.getParameter;
+WebGLRenderingContext.prototype.getParameter = function(p) {
+    if (p === 37445) return 'Intel Inc.';
+    if (p === 37446) return 'Intel Iris OpenGL Engine';
+    return _origGetParam.call(this, p);
+};
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -82,6 +107,11 @@ class CaptchaBrowser:
         self._playwright = await async_playwright().start()
         self._browser = await self._playwright.chromium.launch(
             headless=CAPTCHA_HEADLESS,
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox",
+                "--disable-features=IsolateOrigins,site-per-process",
+            ],
         )
         self._context = await self._browser.new_context(
             viewport={"width": 1265, "height": 1281},
@@ -89,7 +119,10 @@ class CaptchaBrowser:
                 "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
                 "(KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
             ),
+            locale="zh-CN",
+            timezone_id="Asia/Shanghai",
         )
+        await self._context.add_init_script(_STEALTH_INIT_SCRIPT)
         self._cleanup_task = asyncio.create_task(self._cleanup_loop())
         logger.info(f"Browser started (headless={CAPTCHA_HEADLESS})")
 
@@ -197,6 +230,18 @@ class CaptchaBrowser:
                 await self._close_page(uid)
             if to_remove:
                 logger.info(f"Cleaned up {len(to_remove)} idle pages")
+
+    async def _human_mouse_motion(self, page, viewport_w=1265, viewport_h=1281):
+        """Random curved mouse motion to satisfy Aliyun's trajectory check."""
+        steps = random.randint(8, 14)
+        x = random.randint(100, viewport_w - 100)
+        y = random.randint(100, viewport_h - 100)
+        await page.mouse.move(x, y)
+        for _ in range(steps):
+            x = max(50, min(viewport_w - 50, x + random.randint(-200, 200)))
+            y = max(50, min(viewport_h - 50, y + random.randint(-200, 200)))
+            await page.mouse.move(x, y, steps=random.randint(5, 15))
+            await asyncio.sleep(random.uniform(0.03, 0.15))
 
     async def _close_page(self, user_id: str):
         entry = self._pages.pop(user_id, None)
@@ -318,36 +363,59 @@ class CaptchaBrowser:
         await page.unroute("**/api/v2/chat/completions**")
         await page.route("**/api/v2/chat/completions**", capture_route)
 
-        # 使用 Playwright 原生 fill + click send button
+        # Move mouse along a randomized path before interacting — Aliyun
+        # silent-verify scores sessions partially on mouse trajectory, and a
+        # cold click with no prior movement reliably fails the check.
+        await self._human_mouse_motion(page)
+
         input_selector = (
             'textarea, [contenteditable="true"], [role="textbox"]'
         )
         try:
             await page.wait_for_selector(input_selector, timeout=5000)
-            await page.fill(input_selector, "hi")
+            await page.focus(input_selector)
+            await page.locator(input_selector).first.press_sequentially(
+                "hi", delay=random.randint(50, 120)
+            )
         except Exception:
-            logger.warning("input element not found or fill failed")
+            logger.warning("input element not found or type failed")
             raise HTTPException(
                 status_code=503,
                 detail="Chat input not found, page may need re-initialization",
             )
 
-        # 调试：检查 send 按钮状态
+        await asyncio.sleep(random.uniform(0.3, 0.7))
+
         btn_state = await page.evaluate("""() => {
             const btn = document.querySelector('#send-message-button');
             if (!btn) return 'not_found';
             return btn.disabled ? 'disabled' : 'enabled';
         }""")
-        logger.debug(f"send button state after fill: {btn_state}")
+        logger.debug(f"send button state after type: {btn_state}")
 
         if btn_state == 'disabled':
-            # Svelte 可能没有正确响应 fill，尝试手动激活按钮
             await page.evaluate("""() => {
                 const btn = document.querySelector('#send-message-button');
                 if (btn) btn.disabled = false;
             }""")
 
-        await page.click('#send-message-button', timeout=5000)
+        # Move mouse to the send button and click via mouse — page.click jumps
+        # straight to the element which Aliyun flags as automated.
+        btn = await page.query_selector('#send-message-button')
+        if not btn:
+            raise HTTPException(
+                status_code=503,
+                detail="Send button not found",
+            )
+        box = await btn.bounding_box()
+        if box:
+            target_x = box['x'] + box['width'] / 2
+            target_y = box['y'] + box['height'] / 2
+            await page.mouse.move(target_x, target_y, steps=20)
+            await asyncio.sleep(random.uniform(0.1, 0.3))
+            await page.mouse.click(target_x, target_y)
+        else:
+            await page.click('#send-message-button', timeout=5000)
         logger.debug("clicked send button")
 
         try:
@@ -376,6 +444,15 @@ class CaptchaBrowser:
                 detail="Failed to capture captcha token",
             )
         logger.info(f"token captured successfully, len={len(token)}")
+
+        # Reset page state so the next request on this same page starts from a
+        # clean chat view — leaving the sent "hi" in DOM breaks subsequent
+        # captcha triggering.
+        try:
+            await page.goto("https://chat.z.ai", wait_until="domcontentloaded", timeout=10000)
+        except Exception as e:
+            logger.debug(f"post-capture reset navigation failed: {e}")
+
         return token
 
     async def health(self) -> Dict:

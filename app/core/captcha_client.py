@@ -36,11 +36,12 @@ class CaptchaClient:
         self,
         service_url: Optional[str] = None,
         timeout: Optional[float] = None,
+        max_retries: Optional[int] = None,
     ) -> None:
         self._service_url = (service_url or settings.CAPTCHA_SERVICE_URL).rstrip("/")
         self._timeout = timeout or settings.CAPTCHA_SERVICE_TIMEOUT
         self._client: Optional[httpx.AsyncClient] = None
-        self._max_retries = 3
+        self._max_retries = max_retries if max_retries is not None else settings.CAPTCHA_MAX_RETRIES
 
     @property
     def token_url(self) -> str:
@@ -175,10 +176,11 @@ def get_captcha_client() -> Optional[CaptchaClient]:
 def create_captcha_client(
     service_url: Optional[str] = None,
     timeout: Optional[float] = None,
+    max_retries: Optional[int] = None,
 ) -> CaptchaClient:
     """创建并注册 captcha 客户端单例。"""
     global _captcha_client
-    _captcha_client = CaptchaClient(service_url=service_url, timeout=timeout)
+    _captcha_client = CaptchaClient(service_url=service_url, timeout=timeout, max_retries=max_retries)
     logger.info(
         "[captcha] client initialized service_url=%s timeout=%s",
         _captcha_client._service_url,

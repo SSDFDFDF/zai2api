@@ -170,6 +170,7 @@ async def lifespan(app: FastAPI):
         create_captcha_client(
             service_url=settings.CAPTCHA_SERVICE_URL,
             timeout=settings.CAPTCHA_SERVICE_TIMEOUT,
+            max_retries=settings.CAPTCHA_MAX_RETRIES,
         )
         logger.info("captcha client initialized")
 

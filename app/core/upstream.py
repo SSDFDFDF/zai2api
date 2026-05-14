@@ -316,6 +316,27 @@ class UpstreamClient:
         """判断是否为上游并发限制/429 场景。"""
         return is_concurrency_limited(status_code, error_code, error_message)
 
+    async def _try_get_captcha_token(
+        self, transformed: Dict[str, Any]
+    ) -> bool:
+        """获取 captcha token 并写入 transformed body。
+
+        Returns:
+            True 表示成功获取并写入，False 表示失败，调用方自行决定后续操作。
+        """
+        captcha_client = get_captcha_client()
+        if not captcha_client:
+            return False
+        try:
+            fresh_token = await captcha_client.get_token(
+                str(transformed.get("token") or "")
+            )
+            transformed["body"]["captcha_verify_param"] = fresh_token
+            return True
+        except Exception as e:
+            self.logger.warning("[captcha] get token failed: %s", e)
+            return False
+
     @staticmethod
     def _build_upstream_error_response(
         status_code: int,
@@ -1135,17 +1156,10 @@ class UpstreamClient:
             # 对齐浏览器：current_user_message_id 使用和 chats/new 一致的 ID
             body["current_user_message_id"] = prepared.user_message_id
 
-            # Captcha 验证参数
             if settings.CAPTCHA_ENABLED:
-                try:
-                    captcha_client = get_captcha_client()
-                    if captcha_client:
-                        captcha_param = await captcha_client.get_token(token)
-                        body["captcha_verify_param"] = captcha_param
-                        self.logger.info("[captcha] token added to body")
-                except Exception as e:
-                    self.logger.warning("[captcha] failed to get token: %s", e)
-                    # 继续不带 captcha，让上游返回错误后走重试流程
+                transformed_ctx = {"token": token, "body": body}
+                if await self._try_get_captcha_token(transformed_ctx):
+                    self.logger.info("[captcha] token added to body")
 
             self.logger.debug("Upstream request body: %s", body)
 
@@ -1253,24 +1267,14 @@ class UpstreamClient:
                         and captcha_retries < settings.CAPTCHA_MAX_RETRIES
                     ):
                         captcha_retries += 1
-                        captcha_client = get_captcha_client()
-                        if captcha_client:
-                            try:
-                                fresh_token = await captcha_client.get_token(
-                                    str(transformed.get("token") or "")
-                                )
-                                transformed["body"]["captcha_verify_param"] = fresh_token
-                                self.logger.warning(
-                                    "captcha required, retrying with fresh token "
-                                    "(captcha_retry %s/%s)",
-                                    captcha_retries,
-                                    settings.CAPTCHA_MAX_RETRIES,
-                                )
-                                continue
-                            except Exception as e:
-                                self.logger.warning(
-                                    "[captcha] retry get token failed: %s", e
-                                )
+                        if await self._try_get_captcha_token(transformed):
+                            self.logger.warning(
+                                "captcha required, retrying with fresh token "
+                                "(captcha_retry %s/%s)",
+                                captcha_retries,
+                                settings.CAPTCHA_MAX_RETRIES,
+                            )
+                            continue
 
                     if is_page_error:
                         await self._release_authenticated_token_allocation(
@@ -1610,24 +1614,14 @@ class UpstreamClient:
                 ):
                     captcha_retries += 1
                     await response.aclose()
-                    captcha_client = get_captcha_client()
-                    if captcha_client:
-                        try:
-                            fresh_token = await captcha_client.get_token(
-                                str(transformed.get("token") or "")
-                            )
-                            transformed["body"]["captcha_verify_param"] = fresh_token
-                            self.logger.warning(
-                                "captcha required, retrying with fresh token "
-                                "(captcha_retry %s/%s)",
-                                captcha_retries,
-                                settings.CAPTCHA_MAX_RETRIES,
-                            )
-                            continue
-                        except Exception as e:
-                            self.logger.warning(
-                                "[captcha] retry get token failed: %s", e
-                            )
+                    if await self._try_get_captcha_token(transformed):
+                        self.logger.warning(
+                            "captcha required, retrying with fresh token "
+                            "(captcha_retry %s/%s)",
+                            captcha_retries,
+                            settings.CAPTCHA_MAX_RETRIES,
+                        )
+                        continue
 
                 if is_page_error:
                     await response.aclose()
