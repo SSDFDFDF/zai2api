@@ -1,4 +1,4 @@
-# z-ai2api_python
+# zai2api
 
 基于 FastAPI + Granian 的 GLM 代理服务，旨在将网页端 GLM 能力桥接到 OpenAI 兼容接口。
 适合本地开发、自托管代理、Token 池管理和支持 OpenAI Chat Completions 的主流 AI 客户端接入。
@@ -34,8 +34,6 @@
 ### 本地启动
 
 ```bash
-git clone https://github.com/ZyphrZero/z.ai2api_python.git
-cd z.ai2api_python
 
 # 先启动 captcha-provider
 cd captcha-provider
