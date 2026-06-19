@@ -168,19 +168,21 @@ class Settings(BaseSettings):
     # 空回响应最大重试次数
     EMPTY_RESPONSE_MAX_RETRIES: int = int(os.getenv("EMPTY_RESPONSE_MAX_RETRIES", "10"))
 
-    # Captcha Service Configuration
-    # 是否需要 captcha_verify_param（关闭后主服务不再调用 captcha 服务）
+    # Captcha Provider Configuration
+    # 是否需要 captcha_verify_param（关闭后主服务不再调用 captcha provider）
     CAPTCHA_ENABLED: bool = (
         os.getenv("CAPTCHA_ENABLED", "true").lower() == "true"
     )
-    # Captcha token 服务的地址（独立部署时改为实际 IP:Port）
-    CAPTCHA_SERVICE_URL: str = os.getenv(
-        "CAPTCHA_SERVICE_URL", "http://127.0.0.1:9000"
+    # Node captcha-provider 地址。
+    CAPTCHA_PROVIDER_URL: str = os.getenv(
+        "CAPTCHA_PROVIDER_URL", "http://127.0.0.1:9876"
     )
-    # 调用 captcha 服务的超时时间（秒），包含浏览器生成 token 的时间
-    CAPTCHA_SERVICE_TIMEOUT: float = float(
-        os.getenv("CAPTCHA_SERVICE_TIMEOUT", "18.0")
+    # 调用 provider 的超时时间（秒），池空时需要等待浏览器实时生成 token。
+    CAPTCHA_PROVIDER_TIMEOUT: float = float(
+        os.getenv("CAPTCHA_PROVIDER_TIMEOUT", "35.0")
     )
+    # 可选：如果 provider 设置了 SECRET，这里填同一个值，会通过 x-secret 发送。
+    CAPTCHA_PROVIDER_SECRET: str = os.getenv("CAPTCHA_PROVIDER_SECRET", "")
     # captcha 验证失败时最多重试次数（每次重试会重新获取 token）
     CAPTCHA_MAX_RETRIES: int = int(os.getenv("CAPTCHA_MAX_RETRIES", "3"))
 

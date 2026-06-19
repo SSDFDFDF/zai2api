@@ -28,6 +28,7 @@
 ### 环境要求
 
 - Python `3.9` 到 `3.12`
+- Node.js `20+`（用于独立的 `captcha-provider`）
 - 推荐使用 [uv](https://github.com/astral-sh/uv)
 
 ### 本地启动
@@ -36,6 +37,16 @@
 git clone https://github.com/ZyphrZero/z.ai2api_python.git
 cd z.ai2api_python
 
+# 先启动 captcha-provider
+cd captcha-provider
+npm install
+HOST=127.0.0.1 PORT=9876 node server.js
+```
+
+另开一个终端启动 Python 主服务：
+
+```bash
+cd z.ai2api_python
 uv sync
 cp .env.example .env
 # 根据需要修改 .env
@@ -56,6 +67,8 @@ uv run python main.py
 docker compose -f deploy/docker-compose.yml up -d --build
 ```
 
+Docker Compose 会同时启动 Python API 和 `captcha-provider` sidecar。
+
 更多部署说明见 [deploy/README_DOCKER.md](deploy/README_DOCKER.md)。
 
 ## ⚙️ 核心配置
@@ -71,6 +84,9 @@ docker compose -f deploy/docker-compose.yml up -d --build
 | `TOOL_STRATEGY` | `xmlfc` | 工具调用策略：xmlfc / native / glmnative / disabled |
 | `MAX_UPLOAD_FILE_SIZE` | `10485760` | 最大文件上传限制 (10MB) |
 | `DB_PATH` | `tokens.db` | SQLite 数据库路径 |
+| `CAPTCHA_PROVIDER_URL` | `http://127.0.0.1:9876` | Node captcha-provider 地址 |
+| `CAPTCHA_PROVIDER_TIMEOUT` | `35.0` | 获取 captcha token 的读取超时 |
+| `CAPTCHA_PROVIDER_SECRET` | 空 | 可选；与 provider 的 `SECRET` 保持一致 |
 
 完整配置说明请参考 [.env.example](.env.example)。
 

@@ -328,9 +328,7 @@ class UpstreamClient:
         if not captcha_client:
             return False
         try:
-            fresh_token = await captcha_client.get_token(
-                str(transformed.get("token") or "")
-            )
+            fresh_token = await captcha_client.get_token()
             transformed["body"]["captcha_verify_param"] = fresh_token
             return True
         except Exception as e:

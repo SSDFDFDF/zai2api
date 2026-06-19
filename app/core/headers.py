@@ -13,10 +13,16 @@
 - 不发 Referer 路径（chat.z.ai 前端的 referrer policy 让其为空）
 """
 
-import random
 from typing import Dict
 
-from app.utils.user_agent import get_random_user_agent
+CAPTCHA_PROVIDER_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
+)
+
+CAPTCHA_PROVIDER_SEC_CH_UA = (
+    '"Google Chrome";v="133", "Chromium";v="133", "Not A(Brand";v="24"'
+)
 
 
 def build_dynamic_headers(fe_version: str, chat_id: str = "") -> Dict[str, str]:
@@ -27,63 +33,19 @@ def build_dynamic_headers(fe_version: str, chat_id: str = "") -> Dict[str, str]:
         chat_id: 当前对话 ID（保留参数以兼容现有调用方，不再用于构造 Referer）。
 
     Returns:
-        与真实浏览器同源 fetch 一致的最小 header 集合。
-        Firefox UA 不带 sec-ch-ua 系列；Chromium 系带。
+        与 captcha-provider 的 Chrome 133 指纹保持一致的最小 header 集合。
     """
     del chat_id  # 兼容旧签名；真实浏览器同源请求里 Referer 为空，不再据此拼接
-    browser_choices = ["chrome", "chrome", "chrome", "edge", "edge", "firefox", "safari"]
-    browser_type = random.choice(browser_choices)
-    user_agent = get_random_user_agent(browser_type)
-
-    chrome_version = "139"
-    edge_version = "139"
-
-    if "Chrome/" in user_agent:
-        try:
-            chrome_version = user_agent.split("Chrome/")[1].split(".")[0]
-        except Exception:
-            pass
-
-    if "Edg/" in user_agent:
-        try:
-            edge_version = user_agent.split("Edg/")[1].split(".")[0]
-            sec_ch_ua = (
-                f'"Microsoft Edge";v="{edge_version}", '
-                f'"Chromium";v="{chrome_version}", "Not_A Brand";v="24"'
-            )
-        except Exception:
-            sec_ch_ua = (
-                f'"Not_A Brand";v="8", "Chromium";v="{chrome_version}", '
-                f'"Google Chrome";v="{chrome_version}"'
-            )
-    elif "Firefox/" in user_agent:
-        sec_ch_ua = None
-    else:
-        sec_ch_ua = (
-            f'"Not_A Brand";v="8", "Chromium";v="{chrome_version}", '
-            f'"Google Chrome";v="{chrome_version}"'
-        )
-
-    if "Windows" in user_agent:
-        platform = '"Windows"'
-    elif "Macintosh" in user_agent or "Mac OS X" in user_agent:
-        platform = '"macOS"'
-    elif "Linux" in user_agent:
-        platform = '"Linux"'
-    else:
-        platform = '"Windows"'
 
     headers: Dict[str, str] = {
         "Content-Type": "application/json",
-        "User-Agent": user_agent,
-        "Accept-Language": "en-US",
+        "User-Agent": CAPTCHA_PROVIDER_USER_AGENT,
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
         "X-FE-Version": fe_version,
         "X-Region": "overseas",
+        "sec-ch-ua": CAPTCHA_PROVIDER_SEC_CH_UA,
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Windows"',
     }
-
-    if sec_ch_ua:
-        headers["sec-ch-ua"] = sec_ch_ua
-        headers["sec-ch-ua-mobile"] = "?0"
-        headers["sec-ch-ua-platform"] = platform
 
     return headers

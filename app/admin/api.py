@@ -135,6 +135,7 @@ async def reload_settings():
     """热重载配置（重新加载环境变量并更新 settings 对象）"""
     from dotenv import load_dotenv
 
+    from app.core.captcha_client import close_captcha_client, create_captcha_client
     from app.core.openai import reset_upstream_client
     from app.core.config import settings
     from app.utils.guest_session_pool import close_guest_session_pool, get_guest_session_pool
@@ -165,6 +166,15 @@ async def reload_settings():
 
     # 重建上游客户端单例，确保新的 API_ENDPOINT/base_url 立即生效。
     await reset_upstream_client()
+
+    await close_captcha_client()
+    if settings.CAPTCHA_ENABLED:
+        create_captcha_client(
+            provider_url=settings.CAPTCHA_PROVIDER_URL,
+            timeout=settings.CAPTCHA_PROVIDER_TIMEOUT,
+            max_retries=settings.CAPTCHA_MAX_RETRIES,
+            secret=settings.CAPTCHA_PROVIDER_SECRET,
+        )
 
     if not settings.ANONYMOUS_MODE and get_guest_session_pool() is not None:
         logger.info("[guest_session.reload] ANONYMOUS_MODE=false, closing existing guest session pool")

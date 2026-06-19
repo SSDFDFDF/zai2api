@@ -1,9 +1,29 @@
 services:
+  captcha-provider:
+    build:
+      context: ..
+      dockerfile: deploy/captcha-provider.Dockerfile
+    container_name: z-ai-captcha-provider
+    ports:
+      - "9876:9876"
+    environment:
+      - HOST=0.0.0.0
+      - PORT=9876
+      - BROWSER_BACKEND=playwright
+      - CHROMIUM_PATH=/usr/bin/chromium
+      - POOL_SIZE=3
+      - TOKEN_TTL=270000
+      - REFILL_INTERVAL=3000
+    shm_size: "1gb"
+    restart: unless-stopped
+
   api-server:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
     container_name: z-ai-api-server
+    depends_on:
+      - captcha-provider
     ports:
       - "8080:8080"
     volumes:
@@ -21,6 +41,9 @@ services:
       - DEBUG_LOGGING=true
       # 匿名模式
       - ANONYMOUS_MODE=true
+      # Captcha Provider sidecar
+      - CAPTCHA_PROVIDER_URL=http://captcha-provider:9876
+      - CAPTCHA_PROVIDER_TIMEOUT=35.0
       # 工具调用策略: xmlfc | native | glmnative | disabled
       - TOOL_STRATEGY=xmlfc
       # 工具调用扫描限制(字符数)

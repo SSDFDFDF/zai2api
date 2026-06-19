@@ -1,0 +1,13 @@
+{
+  "name": "zai-captcha-provider",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "cloakbrowser": "^0.3.30",
+    "playwright-core": "^1.49.1"
+  }
+}

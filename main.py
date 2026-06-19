@@ -168,11 +168,12 @@ async def lifespan(app: FastAPI):
         from app.core.captcha_client import create_captcha_client
 
         create_captcha_client(
-            service_url=settings.CAPTCHA_SERVICE_URL,
-            timeout=settings.CAPTCHA_SERVICE_TIMEOUT,
+            provider_url=settings.CAPTCHA_PROVIDER_URL,
+            timeout=settings.CAPTCHA_PROVIDER_TIMEOUT,
             max_retries=settings.CAPTCHA_MAX_RETRIES,
+            secret=settings.CAPTCHA_PROVIDER_SECRET,
         )
-        logger.info("captcha client initialized")
+        logger.info("captcha provider client initialized")
 
     await start_token_automation_scheduler()
 

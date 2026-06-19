@@ -581,39 +581,59 @@ CONFIG_SECTIONS: tuple[ConfigSectionSpec, ...] = (
     ConfigSectionSpec(
         id="captcha",
         title="Captcha 验证码",
-        description="控制验证码服务的启用、地址、超时和重试策略。Captcha token 由独立的 Captcha Token Service 通过浏览器生成。",
+        description=(
+            "控制验证码 provider 的启用、地址、超时和重试策略。"
+            "Captcha token 由 Node captcha-provider 通过浏览器生成。"
+        ),
         icon="M12 2L4 5v6.09c0 5.05 3.41 9.76 8 10.91 4.59-1.15 8-5.86 8-10.91V5l-8-3zm-1 13l-3-3 1.41-1.41L11 14.17l5.59-5.59L18 10l-7 5z",
         fields=(
             ConfigFieldSpec(
                 key="CAPTCHA_ENABLED",
                 label="启用 Captcha",
-                description="关闭后主服务不再调用 captcha 服务获取 verify_param。",
+                description="关闭后主服务不再调用 captcha provider 获取 verify_param。",
                 value_type="bool",
                 default_value=True,
             ),
             ConfigFieldSpec(
-                key="CAPTCHA_SERVICE_URL",
-                label="Captcha 服务地址",
-                description="独立部署的 Captcha Token Service 地址。",
+                key="CAPTCHA_PROVIDER_URL",
+                label="Captcha Provider 地址",
+                description="Node captcha-provider 地址。",
                 value_type="str",
-                default_value="http://127.0.0.1:9000",
-                placeholder="http://127.0.0.1:9000",
+                default_value="http://127.0.0.1:9876",
+                placeholder="http://127.0.0.1:9876",
                 wide=True,
             ),
             ConfigFieldSpec(
-                key="CAPTCHA_SERVICE_TIMEOUT",
-                label="Captcha 服务超时（秒）",
-                description="调用 captcha 服务的超时时间，包含浏览器生成 token 的时间。",
+                key="CAPTCHA_PROVIDER_TIMEOUT",
+                label="Captcha Provider 超时（秒）",
+                description=(
+                    "调用 provider 的超时时间，池空时包含浏览器实时生成 "
+                    "token 的时间。"
+                ),
                 value_type="float",
-                default_value=18.0,
+                default_value=35.0,
                 input_type="number",
                 min_value=1.0,
-                placeholder="18.0",
+                placeholder="35.0",
+            ),
+            ConfigFieldSpec(
+                key="CAPTCHA_PROVIDER_SECRET",
+                label="Captcha Provider 密钥",
+                description="如果 provider 设置了 SECRET，这里填同一个值。",
+                value_type="str",
+                default_value="",
+                input_type="password",
+                sensitive=True,
+                placeholder="可选",
+                wide=True,
             ),
             ConfigFieldSpec(
                 key="CAPTCHA_MAX_RETRIES",
                 label="Captcha 最大重试次数",
-                description="captcha 验证失败时最多重试次数，每次重试会重新获取 token。",
+                description=(
+                    "captcha 验证失败时最多重试次数，每次重试会重新获取 "
+                    "token。"
+                ),
                 value_type="int",
                 default_value=3,
                 input_type="number",

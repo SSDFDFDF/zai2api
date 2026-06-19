@@ -45,7 +45,7 @@ cd deploy
 docker compose up -d
 
 # 查看日志
-docker compose logs -f api-server
+docker compose logs -f api-server captcha-provider
 ```
 
 服务将在 `http://localhost:8080` 启动。
@@ -62,12 +62,21 @@ volumes:
   - ./logs:/app/logs      # 应用日志
 ```
 
+### Captcha Provider
+
+`docker-compose.yml` 会同时启动 `captcha-provider` sidecar，API 容器通过
+`CAPTCHA_PROVIDER_URL=http://captcha-provider:9876` 获取
+`captcha_verify_param`。provider 容器默认使用系统 Chromium 和
+`BROWSER_BACKEND=playwright`，便于 Docker 环境稳定构建；如果要改用
+CloakBrowser，可将 provider 服务的 `BROWSER_BACKEND` 改为 `cloak`。
+
 **目录结构**:
 ```
 deploy/
 ├── data/
 │   └── tokens.db          # SQLite 数据库 (自动创建)
 ├── logs/                  # 应用日志 (自动创建)
+├── captcha-provider.Dockerfile
 ├── docker-compose.yml
 ├── Dockerfile
 └── README_DOCKER.md
@@ -86,6 +95,8 @@ deploy/
 | `ANONYMOUS_MODE` | `true` | 匿名访问模式 |
 | `DEBUG_LOGGING` | `true` | 调试日志开关 |
 | `TOOL_STRATEGY` | `xmlfc` | 工具调用策略：xmlfc / native / glmnative / disabled |
+| `CAPTCHA_PROVIDER_URL` | `http://captcha-provider:9876` | Captcha Provider 地址 |
+| `CAPTCHA_PROVIDER_TIMEOUT` | `35.0` | 获取 captcha token 的读取超时 |
 
 **生产环境建议**:
 - 修改 `ADMIN_PASSWORD` 和 `AUTH_TOKEN`
